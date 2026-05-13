@@ -1,0 +1,75 @@
+# Runtime configuration for anju-trader-AI.
+# Changes here are read on each workflow run. No restarts needed.
+
+# ── Operating mode ─────────────────────────────────────────────────
+mode:
+  live: false                 # PAPER mode until Phase 4 cutover passes all gates
+  phase: 0                    # 0=Scaffolding, 1=Tier1, 2=Edge, 3=Agentic, 4=Live
+  ab_compare_with_anju_trader: true
+
+# ── Capital & risk ─────────────────────────────────────────────────
+capital:
+  total_inr: 17500000         # ₹1.75 cr (your real capital — paper book mirrors this)
+  reserve_pct: 10             # Always keep this much in cash
+  max_position_pct: 10        # Max % of capital in one symbol
+  max_open_risk_pct: 5        # Sum of (position risk %) across all open positions
+
+risk:
+  base_risk_per_trade_pct: 1.0    # Phase 1 default; Phase 2 makes this Kelly-scaled
+  max_risk_per_trade_pct: 2.5     # Hard ceiling regardless of conviction
+  max_monthly_drawdown_pct: 8     # Above this, auto-reduce sizes by 50%
+  max_overall_drawdown_pct: 20    # Above this, system halts and alerts Manish
+
+# ── Concentration band (Phase 2+) ──────────────────────────────────
+positions:
+  min_open: 5
+  max_open: 15
+  pyramiding_enabled: true        # HERO verdicts get capital added
+  correlation_threshold: 0.6      # Reduce size if correlated with existing position
+
+# ── Cost model (Phase 1) ───────────────────────────────────────────
+# These default to Zerodha CNC for cash + Zerodha F&O for options.
+# Calibrated against actual brokerage statements monthly.
+costs:
+  brokerage_per_order_inr: 20
+  stt_sell_pct: 0.025             # delivery
+  exchange_pct: 0.00345
+  gst_pct: 18.0                   # on brokerage + exchange
+  sebi_pct: 0.0001
+  stamp_pct_buy: 0.015
+  slippage_pct_by_segment:
+    largecap: 0.05
+    midcap:   0.15
+    smallcap: 0.35
+
+# ── Trading hours (IST) ────────────────────────────────────────────
+market_hours:
+  open:  "09:15"
+  close: "15:30"
+  preopen: "09:00"
+
+# ── F&O leverage layer (Phase 2+) ──────────────────────────────────
+fno:
+  enabled: false                  # Flipped true in Phase 2
+  max_effective_leverage_x: 3
+  iv_percentile_max: 50           # Only buy options when IV in lower half
+  min_open_interest: 100000       # Liquidity filter
+
+# ── Tax (Phase 3+) ─────────────────────────────────────────────────
+tax:
+  ltcg_threshold_days: 365
+  ltcg_defer_window_days: 30      # If within 30 days of LTCG status, defer exit
+  stcg_rate_pct: 20
+  ltcg_rate_pct: 12.5
+  ltcg_exemption_inr: 100000
+
+# ── Universe ────────────────────────────────────────────────────────
+universe:
+  default: nifty500
+  # Refer to config/universe.yaml for the actual symbol lists
+
+# ── Watchdog ───────────────────────────────────────────────────────
+watchdog:
+  max_signal_count_per_day: 30
+  min_signal_count_per_day: 1     # Below this, anomaly_qa flags
+  max_workflow_runtime_min: 30

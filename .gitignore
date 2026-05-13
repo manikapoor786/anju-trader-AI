@@ -1,0 +1,44 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local DB / SQLite (memory.db IS committed for state persistence; others are caches)
+data/historical.db
+data/historical.db-shm
+data/historical.db-wal
+data/news.db
+data/news.db-shm
+data/news.db-wal
+data/archive.db
+*.sqlite
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Secrets — must NEVER be committed
+.env
+.env.local
+secrets.py
+*.kite_token
+
+# Runtime caches
+.earnings_cache.json
+.regime_cache.json
+
+# Reports (regenerable)
+reports/
+
+# One-off experiment scripts (not part of the framework)
+scratch/
+experiments/
+
+# LLM prompt cache (regenerable)
+.prompt_cache/

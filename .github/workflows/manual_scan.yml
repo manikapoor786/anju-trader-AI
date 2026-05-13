@@ -1,0 +1,77 @@
+name: 🔍 Manual Scan (anju-AI)
+
+# Trigger from GitHub mobile app: Actions → Manual Scan → Run workflow.
+# Useful for: ad-hoc scan with custom universe, replaying historical date.
+
+on:
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: "Universe to scan"
+        required: true
+        default: "nifty500"
+        type: choice
+        options: [nifty50, nifty500, nifty750, fno_universe]
+      mode:
+        description: "Scan mode"
+        required: true
+        default: "auto"
+        type: choice
+        options: [auto, strict, aggressive]
+      min_score:
+        description: "Override min score (leave blank for regime default)"
+        required: false
+        default: ""
+      replay_date:
+        description: "Replay scan as if today were this date (YYYY-MM-DD, blank=today)"
+        required: false
+        default: ""
+      enable_catalyst_llm:
+        description: "Run catalyst LLM augment"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  manual_scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Secrets to .env
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"            >> .env
+
+      - name: Run scan
+        run: |
+          python -m anju_ai.loops.morning_scan \
+            --step full \
+            --universe "${{ inputs.universe }}" \
+            --mode "${{ inputs.mode }}" \
+            --min-score "${{ inputs.min_score }}" \
+            --replay-date "${{ inputs.replay_date }}" \
+            --catalyst-llm "${{ inputs.enable_catalyst_llm }}"
+
+      - name: Persist
+        run: |
+          git config user.name  "anju-AI-bot"
+          git config user.email "anju-AI-bot@users.noreply.github.com"
+          git add data/memory.db || true
+          git diff --staged --quiet || git commit -m "chore: manual scan [skip ci]"
+          git push || true

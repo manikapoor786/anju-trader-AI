@@ -1,0 +1,57 @@
+name: 🔬 Deep Review (anju-AI)
+
+# On-demand LLM deep review of a single symbol.
+# Phase 3+ only — Phase 0–2 this workflow exists but errors out gracefully.
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: "NSE symbol (e.g. RELIANCE, BEL)"
+        required: true
+      horizon:
+        description: "Time horizon"
+        required: true
+        default: "BOTH"
+        type: choice
+        options: [SWING_1_4W, POSITIONAL_1_3M, BOTH]
+      question:
+        description: "Optional specific question to answer"
+        required: false
+        default: ""
+      model_preference:
+        description: "LLM to use"
+        required: false
+        default: "auto"
+        type: choice
+        options: [auto, gemini_pro, claude_haiku, claude_sonnet]
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  deep_review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - name: Secrets to .env
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"            >> .env
+          echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"      >> .env
+
+      - name: Deep review
+        run: |
+          python -m anju_ai.loops.deep_review \
+            --symbol "${{ inputs.symbol }}" \
+            --horizon "${{ inputs.horizon }}" \
+            --question "${{ inputs.question }}" \
+            --model "${{ inputs.model_preference }}"

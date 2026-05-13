@@ -1,0 +1,68 @@
+# LLM provider configuration.
+# Per-loop model choice + budget guardrails.
+# All API keys come from GitHub Actions secrets, not this file.
+
+defaults:
+  timeout_seconds: 30
+  retry_count: 1
+  temperature: 0.2          # Low temperature for structured-output reasoning
+
+providers:
+  gemini:
+    base_url: "https://generativelanguage.googleapis.com/v1beta"
+    api_key_env: "GEMINI_API_KEY"
+    free_tier_daily_request_cap: 1500
+    free_tier_rpm: 15
+  claude:
+    base_url: "https://api.anthropic.com"
+    api_key_env: "ANTHROPIC_API_KEY"
+    rpm_cap: 50
+
+# Per-loop assignment.
+# Each entry resolves a model + a fallback chain.
+loops:
+  catalyst_review:
+    primary:  { provider: gemini, model: "gemini-1.5-flash" }
+    fallback: [ { provider: gemini, model: "gemini-1.0-pro" } ]
+    max_input_tokens: 1500
+    max_output_tokens: 400
+    budget_per_call_inr: 0.0   # Free tier
+    estimated_calls_per_day: 30
+
+  post_mortem:
+    primary:  { provider: gemini, model: "gemini-1.5-flash" }
+    fallback: [ { provider: gemini, model: "gemini-1.0-pro" } ]
+    max_input_tokens: 2500
+    max_output_tokens: 500
+    budget_per_call_inr: 0.0
+    estimated_calls_per_day: 5
+
+  weekly_critic:
+    primary:  { provider: claude, model: "claude-sonnet-4-6" }
+    fallback: [ { provider: claude, model: "claude-haiku-4-5-20251001" },
+                { provider: gemini, model: "gemini-1.5-pro" } ]
+    max_input_tokens: 8000
+    max_output_tokens: 2000
+    budget_per_call_inr: 10.0
+    estimated_calls_per_week: 1
+
+  anomaly_qa:
+    primary:  { provider: gemini, model: "gemini-1.5-flash" }
+    fallback: [ { provider: gemini, model: "gemini-1.0-pro" } ]
+    max_input_tokens: 3000
+    max_output_tokens: 800
+    budget_per_call_inr: 0.0
+    estimated_calls_per_day: 8     # Every 3h
+
+  deep_review:
+    primary:  { provider: gemini, model: "gemini-1.5-pro" }
+    fallback: [ { provider: claude, model: "claude-haiku-4-5-20251001" } ]
+    max_input_tokens: 10000
+    max_output_tokens: 3000
+    budget_per_call_inr: 2.0
+    estimated_calls_per_day: 1     # On demand only
+
+# Hard monthly cost ceiling.
+# If projected month-end cost exceeds this, the system halts paid LLM calls
+# and falls back to Gemini-only or rule-only modes. Manish gets notified.
+monthly_budget_ceiling_inr: 2000

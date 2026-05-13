@@ -1,0 +1,44 @@
+# anju-trader-AI dependencies
+# Pinned-loose: minor versions can update, major versions locked.
+
+# Core scientific stack
+numpy>=1.26,<3.0
+pandas>=2.2,<3.0
+scipy>=1.13,<2.0
+ta>=0.11,<1.0
+
+# Data fetching
+requests>=2.32,<3.0
+yfinance>=0.2.40,<1.0
+beautifulsoup4>=4.12,<5.0
+feedparser>=6.0,<7.0
+lxml>=5.0,<6.0
+
+# Charting (forked from anju-trader chart_analysis.py)
+matplotlib>=3.9,<4.0
+mplfinance>=0.12,<1.0
+
+# Config
+PyYAML>=6.0,<7.0
+python-dotenv>=1.0,<2.0
+
+# Validation + typed-LLM I/O
+pydantic>=2.7,<3.0
+
+# LLM clients
+google-generativeai>=0.7,<1.0
+anthropic>=0.40,<1.0
+
+# Kite integration (forked, optional in Phase 0)
+kiteconnect>=5.0,<6.0
+
+# PDF generation (for audit + weekly reports)
+reportlab>=4.5,<5.0
+
+# Telegram (using raw requests — no python-telegram-bot to keep deps light)
+# requests already covers this.
+
+# Test suite
+pytest>=8.0,<9.0
+pytest-asyncio>=0.23,<1.0
+hypothesis>=6.100,<7.0

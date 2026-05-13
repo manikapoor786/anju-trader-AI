@@ -1,0 +1,39 @@
+name: 📒 Paper Book Snapshot
+
+# On-demand snapshot of the paper portfolio to Telegram.
+# Anytime you want to see current open positions, P&L, sizing, risk.
+
+on:
+  workflow_dispatch:
+    inputs:
+      detail_level:
+        description: "Detail level"
+        required: false
+        default: "normal"
+        type: choice
+        options: [brief, normal, full_with_reasoning]
+  schedule:
+    # Saturday 10 AM IST — weekly snapshot
+    - cron: "30 4 * * 6"
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  paper_book:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+      - run: |
+          python -m anju_ai.loops.paper_book \
+            --detail "${{ inputs.detail_level || 'normal' }}"

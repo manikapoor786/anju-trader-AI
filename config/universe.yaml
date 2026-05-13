@@ -1,0 +1,32 @@
+# Stock universes.
+# Phase 0: ports lists from anju-trader.
+# Phase 1: adds survivorship-clean historical lists for backtests.
+
+universes:
+  nifty50:
+    description: "Nifty 50 — index constituents (large cap)."
+    source: "static_list"
+    cache_until: "EOD"
+
+  nifty500:
+    description: "Nifty 500 — broad mid+large cap."
+    source: "nse_dynamic"        # Refreshed weekly from NSE API
+    cache_until: "1W"
+
+  nifty750:
+    description: "anju-trader's hand-curated 750-stock list."
+    source: "static_list"
+    cache_until: "EOD"
+
+  fno_universe:
+    description: "F&O-eligible stocks (for options leverage layer)."
+    source: "nse_dynamic"
+    cache_until: "1W"
+
+backtest_universes:
+  # Phase 1 will populate these with point-in-time historical lists
+  # — i.e. who was in Nifty 500 on 2022-01-01 vs today. Survivorship-clean.
+  nifty500_historical:
+    description: "Point-in-time Nifty 500 membership by date."
+    source: "historical_archive"
+    cache_until: "1Y"

@@ -1,0 +1,104 @@
+name: 🌅 Morning Scan (anju-AI)
+
+on:
+  schedule:
+    # 06:30 IST = 01:00 UTC
+    - cron: "0 1 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: "Universe to scan"
+        required: false
+        default: "nifty500"
+        type: choice
+        options: [nifty50, nifty500, nifty750, fno_universe]
+      mode:
+        description: "Override scan mode (regime-detected by default)"
+        required: false
+        default: "auto"
+        type: choice
+        options: [auto, strict, aggressive]
+      paper_only:
+        description: "Force paper-only (ignore live flag)"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  morning_scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write    # Needed to persist memory.db changes
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Write .env from secrets
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"            >> .env
+          echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"      >> .env
+          echo "KITE_API_KEY=${{ secrets.KITE_API_KEY }}"                >> .env
+          echo "KITE_API_SECRET=${{ secrets.KITE_API_SECRET }}"          >> .env
+          echo "KITE_ACCESS_TOKEN=${{ secrets.KITE_ACCESS_TOKEN }}"      >> .env
+
+      - name: Refresh data layer (bhavcopy + flows + news)
+        run: python -m anju_ai.loops.morning_scan --step refresh
+        continue-on-error: true
+        timeout-minutes: 8
+
+      - name: Detect regime
+        run: python -m anju_ai.loops.morning_scan --step regime
+
+      - name: Run rule-based scan
+        run: |
+          python -m anju_ai.loops.morning_scan \
+            --step scan \
+            --universe "${{ inputs.universe || 'nifty500' }}" \
+            --mode "${{ inputs.mode || 'auto' }}"
+        timeout-minutes: 12
+
+      - name: Catalyst LLM augment (Phase 2+)
+        run: python -m anju_ai.loops.morning_scan --step catalyst
+        continue-on-error: true
+        timeout-minutes: 6
+
+      - name: Paper-fill signals
+        run: |
+          python -m anju_ai.loops.morning_scan \
+            --step paper_fill \
+            --paper-only "${{ inputs.paper_only || 'true' }}"
+
+      - name: Send Telegram digest
+        run: python -m anju_ai.loops.morning_scan --step digest
+
+      - name: Persist memory.db
+        run: |
+          git config user.name  "anju-AI-bot"
+          git config user.email "anju-AI-bot@users.noreply.github.com"
+          git add data/memory.db
+          if git diff --staged --quiet; then
+            echo "No memory changes to commit."
+          else
+            git commit -m "chore: morning scan $(date -u +'%Y-%m-%d') [skip ci]"
+            git push
+          fi

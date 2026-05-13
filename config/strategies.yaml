@@ -1,0 +1,70 @@
+# Strategy definitions.
+# Each strategy is a named bundle of scoring weights + filters + sizing rules.
+# Phase 0 has one strategy (breakout, forked from anju-trader).
+# Phase 2+ adds mean-reversion, earnings-momentum, sector-rotation.
+
+strategies:
+  breakout_v0:
+    description: "Forked from anju-trader scanner.py — unmodified for A/B baseline."
+    enabled: true
+    horizon: ["SWING", "POSITIONAL"]
+    universe: nifty500
+    weights:
+      volume_dryup: 3
+      pocket_pivot: 3
+      breakout_vol: 4
+      breakout_vol_wide_candle_bonus: 2
+      accumulation_high: 3
+      accumulation_moderate: 2
+      base_score: "passthrough"     # 5..10 from base detector
+      second_base_bonus: 3
+      dryup_plus_base_combo: 3
+      pocket_plus_base_combo: 4
+      tight_base_bonus: 2
+      loose_base_penalty: -2
+      rs_strong_accelerating: 4
+      rs_strong_decelerating: 2
+      rs_mild_accelerating: 2
+      rs_underperform: -2
+      stage_2_best: 2
+      stage_2: 1
+      stage_3_topping: -2
+      stage_4_downtrend: -4
+      exhaustion_danger: -4
+      exhaustion_warn: -2
+      mtfa_severe_weekly_down: -8
+      mtfa_weekly_down: -5
+      volume_quality_upper_wick: -2
+    filters:
+      min_score_by_regime:
+        Trending: 6
+        Sideways: 4
+        Volatile: 8
+        Bear: 9
+      min_avg_volume_inr: 5000000      # ₹50L daily turnover floor
+      max_price_inr: 5000              # Avoid super-high-priced names (Phase 0 only)
+    horizons:
+      SWING:
+        min_target_pct: 5
+        max_hold_days: 25
+      POSITIONAL:
+        min_target_pct: 12
+        max_hold_days: 90
+    notes:
+      - "v0 = exact copy of anju-trader logic. v1+ will incorporate cost-adjusted backtest results."
+
+  # Phase 2 additions (placeholders for now):
+  mean_reversion_v0:
+    description: "Buy oversold high-quality names bouncing off MA200."
+    enabled: false   # Activated in Phase 2
+    horizon: ["SWING"]
+
+  earnings_momentum_v0:
+    description: "Post-earnings drift after Q-beat with rising estimates."
+    enabled: false
+    horizon: ["POSITIONAL"]
+
+  sector_rotation_v0:
+    description: "Tactical sector rotation based on RRG quadrant."
+    enabled: false
+    horizon: ["POSITIONAL"]
