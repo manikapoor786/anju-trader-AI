@@ -29,7 +29,7 @@ A living document. Updated at the end of every phase. Each phase has a
 | 0.11 | GitHub workflow stubs (morning.yml, manual_scan.yml, kite_login.yml) | ✅ Done | 2026-05-13 |
 | 0.12 | First commit + push to GitHub | ⏳ Pending Manish creates repo |
 | 0.13 | Fork `data_layer.py` from anju-trader into `anju_core/data_layer.py` | ✅ Done | 2026-05-13 · 12 unit tests, CI workflow added |
-| 0.14 | Fork `regime_detector.py` into `anju_core/regime.py` | ⏳ |
+| 0.14 | Fork `regime_detector.py` into `anju_core/regime.py` | ✅ Done | 2026-05-14 · 12 unit tests on _classify logic |
 | 0.15 | Stub `anju_ai/tools/scoring.py` with v0 (= same logic as anju-trader scanner) | ⏳ |
 | 0.16 | Stub `anju_ai/tools/paper_fill.py` | ⏳ |
 | 0.17 | Stub `anju_ai/memory/db.py` with schema migrations | ⏳ |
