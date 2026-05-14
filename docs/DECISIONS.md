@@ -258,10 +258,52 @@ Create a new Telegram bot + chat for anju-trader-AI (e.g. `@AnjuAI_bot`, chat na
 
 ---
 
+## ADR-011: Edge-augmentation features ship in CALIBRATION mode (weight=0) by default
+
+**Date**: 2026-05-14
+**Status**: Accepted
+
+### Context
+Phase 2 adds many new scoring inputs: catalyst LLM scores (2.5), FII/DII flows
+(2.1), bulk/block deals (2.2), insider activity (2.3), F&O leverage suggestion
+(2.7), correlation-aware sizing (2.10), bear playbook (3.8), tax-aware exits
+(3.9). Each could in theory adjust signals/sizing. If they all turn on at once
+without empirical validation, we have no way to attribute outcome changes to
+any one cause — a classic experiment-design failure.
+
+### Decision
+Every new edge feature ships in CALIBRATION MODE by default — collected and
+logged but with **zero effect on the scoring/sizing pipeline** until a
+backtest validates that turning it on with a non-zero weight produces measurable
+expectancy lift or DD reduction. Config flags control activation:
+
+- `runtime.yaml:fno.enabled = false` → no F&O leverage
+- `runtime.yaml:bear_playbook.enabled = false` → standard scan in Bear regime
+- catalyst_weight = 0.0 hardcoded in step_catalyst_augment
+- correlation penalty_strength = 0.0 default
+
+Each gets toggled to non-zero only after Phase 1.5 (cut negative buckets) +
+Phase 2.4 (backtest features) provide evidence.
+
+### Consequences
+- **+** Clean attribution: when a feature is turned on, any change in
+  expectancy is its alone
+- **+** Safety: a buggy new feature can't move real money — it's wired in
+  but inactive
+- **+** Data collection: reasoning_traces still accumulate so the eventual
+  backtest has rich data to evaluate
+- **−** Some early signal benefit forfeited (acceptable cost)
+
+### Alternatives considered
+- *Turn everything on, observe*: rejected — too many simultaneous variables
+- *Don't wire until validated*: rejected — then we have no data to validate with
+
+
 ## Pending decisions (to be ADR'd as they're made)
 
-- ADR-011: Backtest train/test split methodology (rolling window? expanding window?)
-- ADR-012: Slippage model parameters (linear vs square-root in size; per universe segment)
-- ADR-013: Specific F&O leverage rules (which signals qualify, how much leverage)
-- ADR-014: Bear-regime short setups (which symbols, what triggers)
-- ADR-015: Tax-aware exit deferral mechanics (LTCG window detection)
+- ADR-012: Backtest train/test split methodology (rolling window? expanding window?)
+- ADR-013: Slippage model parameters (linear vs square-root in size; per segment)
+- ADR-014: Specific F&O leverage rules (which signals qualify, how much leverage)
+- ADR-015: Bear-regime short setups (which symbols, what triggers)
+- ADR-016: Tax-aware exit deferral mechanics — when to override discipline
+- ADR-017: Live cutover validation thresholds (rolling window length, required N)

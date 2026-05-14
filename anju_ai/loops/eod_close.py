@@ -105,6 +105,67 @@ def collect_just_closed(con, before_count: int) -> list:
     ]
 
 
+def _check_tax_deferrals(con) -> list[dict]:
+    """For each open position approaching the 365-day LTCG mark with
+    profit, check whether a time-exit should be deferred for tax reasons.
+    Returns list of deferral decisions (symbol, days_to_ltcg, tax_saved).
+
+    Note: this is an ADVISORY signal — it doesn't modify the outcome tracker.
+    Phase 4 (live cutover) will use this to pause auto-execution. Phase 3
+    just surfaces the awareness in audit + Telegram."""
+    try:
+        from anju_ai.tools.tax_aware import evaluate_tax_decision, TaxDecisionInput
+    except Exception:
+        return []
+
+    # Find open positions held > 300 days with current price > entry
+    rows = con.execute("""
+        SELECT s.symbol AS symbol, f.fill_date AS fill_date,
+               f.fill_price AS fill_price, f.fill_qty AS qty
+          FROM signals_current s
+          JOIN fills f ON f.signal_id = s.id
+         WHERE s.backtest_run_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.fill_id = f.id)
+    """).fetchall()
+    if not rows:
+        return []
+
+    deferrals = []
+    for r in rows:
+        try:
+            df = get_ohlcv(r["symbol"], days=10)
+            if df is None or df.empty:
+                continue
+            current = float(df["Close"].iloc[-1])
+            dec = evaluate_tax_decision(TaxDecisionInput(
+                symbol=r["symbol"], fill_date=r["fill_date"],
+                fill_price=r["fill_price"], qty=r["qty"],
+                current_price=current,
+                proposed_exit_reason="TIME_EXIT",
+            ))
+            if dec.action == "DEFER_FOR_LTCG":
+                deferrals.append({
+                    "symbol": r["symbol"],
+                    "days_to_ltcg": dec.days_to_ltcg,
+                    "tax_saved_inr": dec.tax_saved_by_deferring_inr,
+                    "rationale": dec.rationale,
+                })
+        except Exception:
+            continue
+    return deferrals
+
+
+def _send_deferral_alert(deferrals: list[dict]) -> None:
+    lines = [f"📅 <b>anju-AI · Tax-aware deferrals</b>"]
+    for d in deferrals[:10]:
+        lines.append(
+            f"  <b>{d['symbol']}</b>  {d['days_to_ltcg']}d to LTCG  "
+            f"· save ₹{d['tax_saved_inr']:,.0f}"
+        )
+        lines.append(f"    <i>{d['rationale']}</i>")
+    tg_send("\n".join(lines))
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--max-hold", type=int, default=90,
@@ -125,6 +186,16 @@ def main() -> int:
 
     con = init_if_needed()
     try:
+        # Phase 3.9: pre-close pass — check tax-aware deferrals.
+        # Time-exits near the 365-day LTCG mark get deferred + Telegram alert.
+        deferrals = _check_tax_deferrals(con)
+        if deferrals:
+            print(f"  📅 Tax-aware deferral: {len(deferrals)} position(s) "
+                  f"held past time-exit for LTCG benefit")
+            audit_log(con, "TAX_DEFERRAL",
+                      f"Deferred {len(deferrals)} time-exits for LTCG")
+            _send_deferral_alert(deferrals)
+
         before = con.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0]
         stats = close_open_outcomes(con, get_ohlcv,
                                     max_hold_days=args.max_hold)

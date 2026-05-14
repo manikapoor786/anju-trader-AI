@@ -63,13 +63,42 @@ If it doesn't, we still survive.
 
 ## Status
 
-**Phase**: 0 — Scaffolding
+**Last update**: 2026-05-14
 **Branch**: `main`
-**Last update**: 2026-05-13
-**Live capital deployed**: ₹0 (paper-only until validated)
-**Next milestone**: Phase 1 — Tier 1 fixes (outcome tracker, cost model, backtest validation)
+**Tests**: **380 / 380 passing** across all modules
+**Live capital deployed**: ₹0 (paper-only until backtest validates edge)
+**Blocker**: 🧪 Backtest needs re-run with diagnostic logging to debug the 0-trades issue
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the 4-phase plan and current progress.
+### Phase progress
+
+| Phase | Status | Notes |
+|---|---|---|
+| **Phase 0 — Scaffolding** | ✅ **8/8 complete** | Project skeleton, forked primitives, end-to-end paper-fill pipeline |
+| **Phase 1 — Tier 1 fixes** | ✅ **6/8 complete** | 1.5 + 1.8 blocked on backtest output |
+| **Phase 2 — Edge layer** | ✅ **9/10 complete** | 2.4 blocked on backtest output |
+| **Phase 3 — Agentic loops** | ✅ **8/9 complete** | 3.7 blocked on anju-trader DB access (Phase 4 prep) |
+| **Phase 4 — Cutover** | ⏳ Pending | Gated on validation criteria — all defined in ROADMAP |
+
+### What's built
+
+**All five LLM agents are live** (Gemini Flash for high-volume, Claude Sonnet for the weekly critic):
+- 🧠 **catalyst_review** — daily news/filings scoring per candidate (calibration mode, weight=0)
+- 📝 **post_mortem** — after each closed trade, writes structured lesson to `lessons.db`
+- 📋 **weekly_critic** — Sunday 9 AM, proposes specific revisions with /approve workflow
+- 🔍 **anomaly_qa** — every 3h, system self-monitor (Telegram only on WARN/CRITICAL)
+- 🔬 **deep_review** — on-demand multi-angle symbol analysis from your phone
+
+**Plus the full Phase 2 edge stack**:
+- 💰 FII/DII + bulk/block + promoter/SAST daily ingestion (passive, scoring-weight pending backtest)
+- 📊 F&O option chain + IV percentile + leverage gate
+- 🎯 Concentration enforcer (5–15 positions, HERO pyramiding)
+- 📡 Intraday position monitor every 30 min
+- 🔗 Correlation-aware sizing penalty
+- 🐻 Bear-regime defensive playbook + short F&O setups
+- 💼 Tax-aware LTCG deferral logic
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the full breakdown including
+what's pending and why.
 
 ---
 
@@ -100,24 +129,27 @@ anju-trader-AI/
 
 ---
 
-## How to use (when implemented)
+## Workflows (all phone-triggerable from GitHub mobile)
 
-All workflows have `workflow_dispatch` inputs and are triggerable from the GitHub mobile app.
+| Workflow | Schedule | What it does |
+|---|---|---|
+| **🌅 morning.yml** | 6:30 AM IST Mon–Fri | Refresh data → detect regime → score universe → catalyst LLM augment → paper-fill top 15 → Telegram digest |
+| **📡 intraday.yml** | every 30 min market hrs | Check open paper positions for stop/target hits → Telegram alerts only on triggers |
+| **📊 eod_close.yml** | 4:00 PM IST Mon–Fri | Event-driven outcome closure with first-touch detection + cost-adjusted P&L |
+| **📝 postmortem.yml** | 4:30 PM IST Mon–Fri | LLM writes a structured lesson for each closed trade |
+| **🔍 anomaly_qa.yml** | every 3 hours | System self-monitor — Telegram only on WARN/CRITICAL |
+| **📋 weekly_critic.yml** | Sun 9:00 AM IST | Claude reviews the week and proposes revisions |
+| **📒 audit_report.yml** | Sat 11:00 AM IST | Reads memory.db and Telegrams a structured weekly summary |
+| **🧪 backtest.yml** | on demand | Walk-forward replay of scoring on 2 years of bhavcopy |
+| **📥 backfill_history.yml** | on demand | Backfill N days of bhavcopy into Actions cache |
+| **🔎 verify_history.yml** | on demand | Confirms cached historical.db has real data |
+| **🔍 manual_scan.yml** | on demand | Re-run the morning scan with custom universe/mode |
+| **🔬 manual_review.yml** | on demand | Deep LLM review of a single symbol from your phone |
+| **✅ manual_revision.yml** | on demand | Approve/reject a weekly_critic proposal by id |
+| **📒 paper_book.yml** | Sat 10 AM + on demand | Paper portfolio snapshot to Telegram |
+| **📊 ab_compare.yml** | Sun 11 AM IST | anju-trader-AI vs anju-trader comparison report |
 
-```
-Workflow                  Schedule            Phone-triggerable?
-─────────────────────────────────────────────────────────────────
-morning.yml               6:30 AM IST         ✅
-intraday.yml              every 30m mkt hrs   ✅
-eod.yml                   4:00 PM IST         ✅
-weekly_critic.yml         Sun 9:00 AM IST     ✅
-manual_scan.yml           on demand           ✅
-manual_review.yml         on demand           ✅ (deep LLM review of any stock)
-manual_backtest.yml       on demand           ✅
-manual_paper_book.yml     on demand           ✅ (paper portfolio snapshot)
-```
-
-Interactive Telegram: when the weekly critic proposes a change, you'll get a message with `/approve_<id>` and `/reject_<id>` buttons. The change merges only on approve.
+**Approval flow** (per ADR-005, human approval forever): when weekly_critic proposes a change, the Telegram message includes a proposal id. Trigger `manual_revision.yml` from GitHub mobile with that id + action (approve / reject). The change applies only on approve.
 
 ---
 
@@ -168,16 +200,31 @@ If `anju-trader-AI` is doing what it's supposed to do, every ₹1 of cost should
 
 ## What you (Manish) need to do
 
-| When | Action | Where |
-|---|---|---|
-| Now | Review docs, approve architecture | `docs/ARCHITECTURE.md` + this file |
-| Phase 0 done | Create GitHub repo, push code | One push command from terminal |
-| Phase 1 done | Review backtest results | Telegram digest + a PDF |
-| Phase 2 done | Compare against anju-trader for 30 days | A/B report sent to Telegram |
-| Phase 3 done | Approve weekly critic proposals (5 min/wk) | Telegram interactive buttons |
-| Phase 4 cutover | Migrate live capital | Single config flip |
+### Right now (immediate unblock)
 
-You do not need to be in front of a laptop to run this. Everything is phone-controllable.
+**Re-trigger 🧪 Backtest workflow** with these defaults:
+- start_date: 2024-05-14
+- end_date: 2026-05-14
+- universe: nifty100
+- mode: strict
+- min_score: 6
+
+The first attempt produced 0 closed trades. I've added aggressive diagnostic
+logging to `anju_ai/tools/backtest.py` that will surface the root cause on
+re-run. Paste the diagnostic lines from the workflow log (`[backtest] Day N/493 ...`
+and `[backtest] DIAGNOSTIC SUMMARY`) and I'll ship the fix.
+
+### Ongoing (after backtest works)
+
+| Cadence | Action | Effort |
+|---|---|---|
+| Weekly | Approve/reject `weekly_critic` proposals via manual_revision.yml | ~5 min |
+| Weekly | Glance at the Saturday audit report Telegram | ~2 min |
+| As needed | Trigger `manual_review.yml` to deep-LLM-review a symbol | ~30s |
+| As needed | Trigger `manual_scan.yml` for ad-hoc scan on different universe | ~30s |
+| Phase 4 cutover | Flip `config/runtime.yaml: live=true` after validation passes | one config edit |
+
+You do not need to be in front of a laptop. Everything is phone-controllable.
 
 ---
 

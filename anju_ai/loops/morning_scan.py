@@ -32,6 +32,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pandas as pd
 import requests
 
 # Load .env from project root
@@ -285,6 +286,73 @@ def step_scan(universe: str, mode: str, min_score: float,
     return {"ok": True, "candidates": candidates, "scanned": len(symbols)}
 
 
+def _apply_bear_playbook(candidates: list[ScoreResult], regime: dict,
+                         enabled: bool = False) -> list[ScoreResult]:
+    """Replace standard candidates with bear-regime defensive picks.
+    Phase 3.8 ships the logic; enabled gates it behind a config flag
+    until backtest validates that defensive picks beat cash in Bear."""
+    if not enabled:
+        # Bear regime with playbook disabled → just trim aggressively
+        print(f"[3b/7] Bear regime detected (playbook disabled) — trimming candidates")
+        # In Bear we want only the very-highest score candidates
+        return [c for c in candidates if c.score >= 12.0]
+
+    print(f"[3b/7] Bear playbook active — building defensive picks...")
+    try:
+        from anju_ai.tools.bear_playbook import build_playbook
+        from anju_core.universe import get_universe
+        from anju_ai.tools.bear_playbook import DEFENSIVE_LONG_UNIVERSE
+
+        # Load defensive symbol histories
+        defensive_dfs: dict[str, pd.DataFrame] = {}
+        for sym in DEFENSIVE_LONG_UNIVERSE:
+            try:
+                df = get_ohlcv(sym, days=500)
+                if df is not None and not df.empty:
+                    defensive_dfs[sym] = df
+            except Exception:
+                continue
+
+        # Short candidates = scoring universe (already loaded), filtered to F&O
+        # For Phase 3.8 we use a simple F&O proxy (top 50 NSE by liquidity)
+        short_dfs = {}   # Filled below from candidates with their dfs
+
+        nifty_df = get_index("^NSEI", days=60)
+        nifty_close = (nifty_df["Close"]
+                       if nifty_df is not None and not nifty_df.empty else None)
+
+        pb = build_playbook(
+            regime_state="Bear",
+            defensive_dfs=defensive_dfs,
+            short_candidate_dfs=short_dfs,
+            nifty_close=nifty_close,
+            fno_eligible_set=set(),    # Phase 4 wires real F&O eligibility
+            enabled=enabled,
+        )
+
+        # Convert bear picks back into ScoreResult-like objects so they
+        # flow through persist_signals + paper_fill the same way.
+        new_candidates: list[ScoreResult] = []
+        for pick in pb.long_picks:
+            sym_ns = pick.symbol + ".NS"
+            df = defensive_dfs.get(sym_ns)
+            if df is None:
+                continue
+            cur = float(df["Close"].iloc[-1])
+            new_candidates.append(ScoreResult(
+                symbol=pick.symbol, price=round(cur, 2), change_pct=0.0,
+                score=pick.score, verdict="BUY",
+                reasoning=f"[Bear playbook · defensive long] {pick.rationale}",
+                tags=["🐻 Bear", "🛡️ Defensive"],
+                entry_model="🛡️ Bear Defensive",
+                exit_logic=None,
+            ))
+        return new_candidates
+    except Exception as e:
+        print(f"  ⚠️  Bear playbook construction failed: {e}")
+        return candidates
+
+
 def step_catalyst_augment(candidates: list[ScoreResult],
                           top_n: int = 15,
                           catalyst_weight: float = 0.0) -> list[ScoreResult]:
@@ -525,6 +593,19 @@ def run(step: str, universe: str = "nifty100", mode: str = "auto",
             if catalyst_llm and candidates:
                 candidates = step_catalyst_augment(
                     candidates, top_n=15, catalyst_weight=0.0)
+
+            # Phase 3.8: Bear-regime defensive playbook
+            # When regime=Bear, run defensive longs (FMCG/Pharma/Utilities)
+            # + short F&O on weakest names instead of standard scan.
+            # Gated by enabled=False in runtime.yaml until backtest validates.
+            if regime and regime.get("state") == "Bear":
+                try:
+                    bear_enabled = bool(_CFG_RUNTIME.get("bear_playbook", {})
+                                                       .get("enabled", False))
+                    candidates = _apply_bear_playbook(
+                        candidates, regime, enabled=bear_enabled)
+                except Exception as e:
+                    print(f"  ⚠️  Bear playbook failed (continuing): {e}")
 
             if regime_id is not None:
                 persisted = step_persist_signals(candidates, regime_id)

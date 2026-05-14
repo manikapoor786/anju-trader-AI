@@ -1,7 +1,8 @@
 # Roadmap — anju-trader-AI
 
-> Last updated: 2026-05-13
-> Current phase: **Phase 0 (Scaffolding)**
+> Last updated: 2026-05-14
+> Current phase: **Phases 0-3 substantially complete** (380 tests passing)
+> Status: Awaiting backtest re-run for empirical validation before Phase 4 cutover.
 
 A living document. Updated at the end of every phase. Each phase has a
 **Definition of Done** that must pass before moving on.
