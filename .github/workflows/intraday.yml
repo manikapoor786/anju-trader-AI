@@ -1,0 +1,50 @@
+name: 📡 Intraday Monitor (anju-AI)
+
+# Every 30 min during NSE market hours (09:15-15:30 IST = 03:45-10:00 UTC)
+# Mon-Fri. Checks open paper positions for stop hits, target hits, stale
+# positions. Sends Telegram alerts only when something triggers.
+
+on:
+  schedule:
+    # 09:45, 10:15, 10:45, 11:15, 11:45, 12:15, 12:45, 13:15, 13:45,
+    # 14:15, 14:45, 15:15 IST → UTC = 4:15, 4:45, 5:15... 9:45
+    - cron: "15,45 4-9 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      max_hold_days:
+        description: "Force time-exit alert after N trading days"
+        required: false
+        default: "90"
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - name: Secrets to .env
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+      - name: Run intraday monitor
+        run: |
+          python -m anju_ai.loops.intraday_monitor \
+            --max-hold "${{ inputs.max_hold_days || '90' }}"
+      - name: Persist memory.db
+        run: |
+          git config user.name  "anju-AI-bot"
+          git config user.email "anju-AI-bot@users.noreply.github.com"
+          git add data/memory.db || true
+          git diff --staged --quiet || git commit -m "chore: intraday audit [skip ci]"
+          git push || true
