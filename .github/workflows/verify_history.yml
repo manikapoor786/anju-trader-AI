@@ -1,0 +1,106 @@
+name: 🔎 Verify Historical Data
+
+# Quick sanity check: reads cached historical.db, prints stats, sends Telegram.
+# Use this before triggering Backtest to confirm 2y of data is actually present.
+
+on:
+  workflow_dispatch:
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Restore historical.db cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/historical.db
+            data/historical.db-shm
+            data/historical.db-wal
+          key: historical-db
+          restore-keys: |
+            historical-db-
+
+      - name: Secrets to .env
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+
+      - name: Inspect DB
+        run: |
+          python - <<'PY'
+          import os, sqlite3, requests
+          from pathlib import Path
+          from anju_core.data_layer import _resolve_db_path
+
+          p = _resolve_db_path()
+          if not p.exists():
+              size_mb = 0
+              total = syms = 0
+              dates = (None, None)
+              logged = holidays = 0
+              status = "❌ NO DB FOUND in Actions cache"
+              advice = "Trigger 📥 Backfill Historical Data workflow first."
+          else:
+              size_mb = round(p.stat().st_size / 1024 / 1024, 1)
+              con = sqlite3.connect(p)
+              cur = con.cursor()
+              total = cur.execute('SELECT COUNT(*) FROM daily_ohlcv').fetchone()[0]
+              syms  = cur.execute('SELECT COUNT(DISTINCT symbol) FROM daily_ohlcv').fetchone()[0]
+              dates = cur.execute('SELECT MIN(date), MAX(date) FROM daily_ohlcv').fetchone()
+              logged = cur.execute('SELECT COUNT(*) FROM bhavcopy_log').fetchone()[0]
+              holidays = cur.execute(\"SELECT COUNT(*) FROM bhavcopy_log WHERE source='holiday'\").fetchone()[0]
+              parse_errs = cur.execute(\"SELECT COUNT(*) FROM bhavcopy_log WHERE source='parse_error'\").fetchone()[0]
+              good = cur.execute(\"SELECT COUNT(*) FROM bhavcopy_log WHERE source='bhavcopy'\").fetchone()[0]
+              con.close()
+
+              if total < 10000:
+                  status = '❌ DB exists but mostly empty'
+                  advice = ('Bhavcopy downloads failed. Likely NSE URL format changed. '
+                            'I need to debug and update _bhavcopy_url() in anju_core/data_layer.py.')
+              elif total < 500_000:
+                  status = '⚠️ Partial — some data but not 2 full years'
+                  advice = f'Got {total:,} rows. May still be usable for shorter backtests.'
+              else:
+                  status = '✅ Healthy — ready for backtest'
+                  advice = ('Trigger 🧪 Backtest workflow with default 2024-05-14 → '
+                            '2026-05-14 dates.')
+
+              print(f'Successful bhavcopy days: {good}')
+              print(f'Holidays/skipped: {holidays}')
+              print(f'Parse errors: {parse_errs}')
+
+          msg = (
+              f'🔎 <b>historical.db verification</b>\\n'
+              f'{status}\\n\\n'
+              f'  DB size: <b>{size_mb} MB</b>\\n'
+              f'  Total rows: <b>{total:,}</b>\\n'
+              f'  Unique symbols: <b>{syms}</b>\\n'
+              f'  Date range: <code>{dates[0]} → {dates[1]}</code>\\n'
+              f'  Days logged: {logged}  ({holidays} holidays/weekends)\\n\\n'
+              f'<i>{advice}</i>'
+          )
+
+          print(msg.replace('<b>','').replace('</b>','').replace('<i>','').replace('</i>','').replace('<code>','').replace('</code>','').replace('\\n','\\n'))
+
+          tok = os.getenv('TELEGRAM_BOT_TOKEN', '')
+          chat = os.getenv('TELEGRAM_CHAT_ID', '')
+          if tok and chat:
+              requests.post(
+                  f'https://api.telegram.org/bot{tok}/sendMessage',
+                  json={'chat_id': chat, 'text': msg, 'parse_mode': 'HTML'},
+                  timeout=15,
+              )
+          PY
