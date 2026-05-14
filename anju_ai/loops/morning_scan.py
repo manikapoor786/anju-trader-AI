@@ -160,6 +160,24 @@ def step_refresh() -> dict:
     except Exception as e:
         out["flows_error"] = str(e)
 
+    # Fetch + persist today's bulk + block deals (passive — Phase 2.4 wires scoring).
+    try:
+        from anju_ai.tools.deals import fetch_deals, save_deals
+        bulk  = fetch_deals("bulk")
+        block = fetch_deals("block")
+        all_deals = bulk + block
+        if all_deals:
+            con = init_if_needed()
+            try:
+                rid = save_deals(con, all_deals)
+                audit_log(con, "DEALS_FETCHED",
+                          f"#{rid} bulk={len(bulk)} block={len(block)}")
+                out["deals"] = f"bulk={len(bulk)} block={len(block)}"
+            finally:
+                con.close()
+    except Exception as e:
+        out["deals_error"] = str(e)
+
     return out
 
 

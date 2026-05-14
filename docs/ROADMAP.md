@@ -94,7 +94,7 @@ If backtest fails to clear these bars, **we stop and rethink the scoring before 
 | # | Task | Status | Notes |
 |---|---|---|---|
 | 2.1 | `anju_ai/tools/flows.py` — FII/DII daily ingest from NSE | ✅ Done | 2026-05-14 · 15 unit tests · UPSERT into flows_snapshots · wired into morning_scan refresh · passive collection (not yet scoring input) |
-| 2.2 | `anju_ai/tools/flows.py` — bulk + block deals daily ingest | ⏳ | |
+| 2.2 | `anju_ai/tools/deals.py` — bulk + block deals daily ingest | ✅ Done | 2026-05-14 · 20 unit tests · JSON merge with dedupe · wired into morning_scan · passive collection |
 | 2.3 | `anju_ai/tools/flows.py` — promoter + insider (SAST) ingest | ⏳ | |
 | 2.4 | Backtest flows as scoring features → measure expectancy lift | ⏳ | |
 | 2.5 | `anju_ai/tools/catalyst.py` + LLM client (Gemini Flash) — daily news/filings scan per candidate | ⏳ | Audit finding 3.9 |
