@@ -1,0 +1,32 @@
+name: 📊 A/B Compare (vs anju-trader)
+
+on:
+  schedule:
+    # Every Sunday 11 AM IST
+    - cron: "30 5 * * 0"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Window in days"
+        required: true
+        default: "30"
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  ab_compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+      - run: python -m anju_ai.loops.ab_compare --days "${{ inputs.days || '30' }}"
