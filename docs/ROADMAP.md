@@ -98,7 +98,7 @@ If backtest fails to clear these bars, **we stop and rethink the scoring before 
 | 2.3 | `anju_ai/tools/insider.py` — promoter + insider (SAST) ingest | ✅ Done | 2026-05-14 · 19 unit tests · grouped-by-date persistence · insider_signal_for_symbol aggregator · wired into morning_scan |
 | 2.4 | Backtest flows as scoring features → measure expectancy lift | ⏳ | |
 | 2.5 | `anju_ai/tools/catalyst.py` + LLM client (Gemini Flash) — daily news/filings scan per candidate | ✅ Done | 2026-05-14 · 15 unit tests · prompt v1 · apply_catalyst_to_score with weight=0 calibration default |
-| 2.6 | Wire `agent.catalyst_review` loop (see AGENT_PROTOCOL §2.1) | ⏳ | First real LLM use |
+| 2.6 | Wire `agent.catalyst_review` loop (see AGENT_PROTOCOL §2.1) | ✅ Done | 2026-05-14 · step_catalyst_augment runs top 15 candidates · calibration mode (weight=0) until Phase 2.4 backtest validates weight |
 | 2.7 | `anju_ai/tools/options.py` — fetch IV percentile, recommend ATM calls when conviction high + IV low | ✅ Done | 2026-05-14 · 24 unit tests · iv_history migration 003 · evaluate_leverage gated by fno_enabled flag |
 | 2.8 | Concentration enforcer: max 15, min 5 positions; pyramiding on HERO | ✅ Done | 2026-05-14 · 13 unit tests · enforce_concentration with NEW_OPEN/PYRAMID/SKIP actions · config-driven via ConcentrationConfig |
 | 2.9 | `anju_ai/loops/intraday_monitor.py` — every 30 min mkt hours | ✅ Done | 2026-05-14 · 13 unit tests · classify_alert routing (CRITICAL/WARN/INFO) · is_market_open + intraday.yml cron 15,45 4-9 UTC |

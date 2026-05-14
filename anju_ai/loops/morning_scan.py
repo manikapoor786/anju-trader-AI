@@ -285,6 +285,74 @@ def step_scan(universe: str, mode: str, min_score: float,
     return {"ok": True, "candidates": candidates, "scanned": len(symbols)}
 
 
+def step_catalyst_augment(candidates: list[ScoreResult],
+                          top_n: int = 15,
+                          catalyst_weight: float = 0.0) -> list[ScoreResult]:
+    """Phase 2.6: per-candidate Gemini catalyst review on TOP N candidates.
+
+    Mode is CALIBRATION (catalyst_weight=0.0) until Phase 2.4 backtests the
+    real weight. Reviews still run + traces still persist, so we accumulate
+    the data needed for calibration without affecting live signals.
+
+    Returns the same candidates list with optional adjustments. Caller can
+    pass the result straight to step_persist_signals.
+    """
+    if not candidates:
+        return candidates
+    if not os.getenv("GEMINI_API_KEY"):
+        print("[3a/7] Catalyst augment skipped — no GEMINI_API_KEY")
+        return candidates
+
+    try:
+        from anju_ai.tools.catalyst import (
+            review_catalyst, apply_catalyst_to_score,
+            CatalystReviewInput,
+        )
+        from anju_ai.llm.gemini import GeminiClient
+        from anju_ai.llm.trace import log_trace
+    except Exception as e:
+        print(f"[3a/7] Catalyst augment skipped — import failed: {e}")
+        return candidates
+
+    print(f"[3a/7] Catalyst augment top {min(top_n, len(candidates))} candidates...")
+    client = GeminiClient()
+    con = init_if_needed()
+    try:
+        for r in candidates[:top_n]:
+            inp = CatalystReviewInput(
+                symbol=r.symbol, rule_based_score=r.score,
+                # news_24h and filings_7d are placeholder lists until
+                # Phase 2 news ingest is fully wired
+                news_24h=[], filings_7d=[],
+            )
+            try:
+                resp = review_catalyst(inp, client=client)
+                log_trace(con, "catalyst_review", resp,
+                          input_payload=inp.model_dump())
+                if resp.status == "OK" and resp.parsed is not None:
+                    # Apply (with weight=0 default → no effect; capture only)
+                    new_score = apply_catalyst_to_score(
+                        r.score, resp.parsed, catalyst_weight=catalyst_weight)
+                    if new_score != r.score:
+                        r.score = new_score
+                    # BLOCK signal: set verdict to AVOID + flag
+                    if resp.parsed.suggested_action == "BLOCK":
+                        r.verdict = "AVOID"
+                        r.reasoning = f"BLOCKED by catalyst: {resp.parsed.primary_driver}"
+            except Exception as e:
+                # Per-symbol failure non-fatal
+                audit_log(con, "CATALYST_FAILED",
+                          f"{r.symbol}: {type(e).__name__}")
+                continue
+        audit_log(con, "CATALYST_BATCH",
+                  f"Reviewed top {min(top_n, len(candidates))} candidates "
+                  f"(weight={catalyst_weight} — calibration mode)")
+    finally:
+        con.close()
+    candidates.sort(key=lambda r: r.score, reverse=True)
+    return candidates
+
+
 def step_persist_signals(candidates: list[ScoreResult], regime_id: int,
                          horizon: str = "SWING") -> dict:
     """Write top candidates to memory.signals + paper-fill them."""
@@ -420,9 +488,10 @@ def run(step: str, universe: str = "nifty100", mode: str = "auto",
     print(f"\n🌱 anju-AI morning_scan  step={step}  universe={universe}  "
           f"mode={mode}  {datetime.now().strftime('%H:%M IST')}\n")
 
-    # Phase 0 stubs for steps that don't have real implementations yet
+    # Note: 'catalyst' as a standalone step would need to load candidates
+    # from a prior scan — usually we run it inline as part of 'full'.
     if step == "catalyst":
-        print("[Phase 2 stub] catalyst LLM augment — no-op until task 2.6")
+        print("Catalyst is inlined into 'full' step (see step_catalyst_augment)")
         return 0
 
     try:
@@ -448,6 +517,14 @@ def run(step: str, universe: str = "nifty100", mode: str = "auto",
             r = step_scan(universe, actual_mode, min_score)
             candidates = r["candidates"]
             scanned = r["scanned"]
+
+            # Phase 2.6: catalyst augment — calibration mode (weight=0)
+            # until backtest validates the actual weight. Captures traces
+            # so we accumulate data for Phase 2.4 backtest of catalyst
+            # predictive value.
+            if catalyst_llm and candidates:
+                candidates = step_catalyst_augment(
+                    candidates, top_n=15, catalyst_weight=0.0)
 
             if regime_id is not None:
                 persisted = step_persist_signals(candidates, regime_id)
