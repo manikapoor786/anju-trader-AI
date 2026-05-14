@@ -211,14 +211,29 @@ def run_backtest(inp: BacktestInput,
         progress_cb(0, 0, f"Loading {len(inp.universe_symbols)} symbol histories...")
 
     histories: dict[str, pd.DataFrame] = {}
+    load_stats = {"loaded": 0, "empty": 0, "errors": 0, "lengths": []}
     for sym in inp.universe_symbols:
         try:
             df = ohlcv_loader(sym, days=1500)
             if df is not None and not df.empty:
                 df.index = pd.to_datetime(df.index)
                 histories[sym] = df
+                load_stats["loaded"] += 1
+                load_stats["lengths"].append(len(df))
+            else:
+                load_stats["empty"] += 1
         except Exception:
+            load_stats["errors"] += 1
             continue
+
+    avg_len = (sum(load_stats["lengths"]) / max(len(load_stats["lengths"]), 1))
+    print(f"[backtest] Histories loaded: {load_stats['loaded']}/{len(inp.universe_symbols)} "
+          f"(empty={load_stats['empty']}, errors={load_stats['errors']}). "
+          f"Avg rows/symbol: {avg_len:.0f}")
+    if load_stats["lengths"]:
+        print(f"[backtest] Sample dates from first symbol: "
+              f"{list(histories.values())[0].index.min()} → "
+              f"{list(histories.values())[0].index.max()}")
 
     if not histories:
         raise RuntimeError("No symbol histories loaded — check ohlcv_loader / data availability")
@@ -241,6 +256,9 @@ def run_backtest(inp: BacktestInput,
     # ── 2. Walk day-by-day ──────────────────────────────────────
     trades: list[TradeRecord] = []
     open_positions: list[dict] = []   # signals filled but not yet closed
+    diag = {"days_scored": 0, "candidates_seen": 0, "candidates_filled": 0,
+            "fill_lookup_misses": 0, "scoring_returned_none": 0,
+            "scoring_below_threshold": 0}
 
     for day_idx, as_of in enumerate(trading_days):
         # Close any open positions whose stop/target was hit by today
@@ -302,6 +320,8 @@ def run_backtest(inp: BacktestInput,
 
         # Score every symbol as of this date in parallel
         score_results: list[ScoreResult] = []
+        day_none = 0
+        day_below = 0
         with ThreadPoolExecutor(max_workers=inp.max_workers) as ex:
             futures = [
                 ex.submit(_score_one_at_date, sym, df, as_of, inp.mode, nifty_close)
@@ -312,8 +332,23 @@ def run_backtest(inp: BacktestInput,
                     _, res = fut.result(timeout=60)
                 except Exception:
                     continue
-                if res and res.score >= inp.min_score:
+                if res is None:
+                    day_none += 1
+                elif res.score < inp.min_score:
+                    day_below += 1
+                else:
                     score_results.append(res)
+
+        diag["days_scored"] += 1
+        diag["scoring_returned_none"] += day_none
+        diag["scoring_below_threshold"] += day_below
+        diag["candidates_seen"] += len(score_results)
+
+        # Periodic diagnostic — surface what's filtering everything out
+        if day_idx % 25 == 0 and day_idx > 0:
+            print(f"[backtest] Day {day_idx}/{len(trading_days)} {as_of.date()}: "
+                  f"scored={len(histories)} → None={day_none}, "
+                  f"below_min={day_below}, candidates={len(score_results)}")
 
         # Take top N for available slots
         score_results.sort(key=lambda r: r.score, reverse=True)
@@ -331,6 +366,7 @@ def run_backtest(inp: BacktestInput,
                         df_full = histories[key]
                         break
             if df_full is None:
+                diag["fill_lookup_misses"] += 1
                 continue
             df_post = df_full[df_full.index > as_of]
             if df_post.empty:
@@ -362,6 +398,18 @@ def run_backtest(inp: BacktestInput,
             progress_cb(day_idx, len(trading_days),
                         f"Day {day_idx+1}/{len(trading_days)} {as_of.date()} "
                         f"· trades={len(trades)} · open={len(open_positions)}")
+
+    # Final diagnostic dump
+    print(f"[backtest] DIAGNOSTIC SUMMARY")
+    print(f"  Days scored: {diag['days_scored']}")
+    print(f"  Scoring returned None: {diag['scoring_returned_none']:,} "
+          f"({diag['scoring_returned_none'] / max(diag['days_scored'] * len(histories), 1) * 100:.1f}%)")
+    print(f"  Scoring below min_score: {diag['scoring_below_threshold']:,} "
+          f"({diag['scoring_below_threshold'] / max(diag['days_scored'] * len(histories), 1) * 100:.1f}%)")
+    print(f"  Candidates above threshold: {diag['candidates_seen']:,}")
+    print(f"  Fill lookup misses: {diag['fill_lookup_misses']}")
+    print(f"  Total trades closed: {len(trades)}")
+    print(f"  Positions still open at end: {len(open_positions)}")
 
     # ── 3. Aggregate report ─────────────────────────────────────
     report = _build_report(inp, trades, open_positions, len(trading_days),
