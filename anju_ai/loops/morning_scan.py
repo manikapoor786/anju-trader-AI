@@ -133,13 +133,34 @@ def _compute_qty(price: float, stop: float | None, total_capital: float = CAPITA
 # ── Pipeline steps ────────────────────────────────────────────────────────────
 
 def step_refresh() -> dict:
-    """Refresh historical.db with any missing bhavcopy dates."""
-    print("[1/7] Refresh historical data...")
+    """Refresh historical.db with any missing bhavcopy dates + today's flows."""
+    print("[1/7] Refresh historical data + flows...")
+    out = {"ok": True}
     try:
         n = refresh_daily(days_back=10, verbose=False)
-        return {"ok": True, "new_rows": n}
+        out["new_ohlcv_rows"] = n
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        out["ohlcv_error"] = str(e)
+        out["ok"] = False
+
+    # Fetch + persist today's FII/DII (passive — not yet used in scoring).
+    # Failure is non-fatal: scan proceeds without flows data.
+    try:
+        from anju_ai.tools.flows import fetch_fii_dii, save_flows_snapshot
+        snap = fetch_fii_dii()
+        if snap is not None:
+            con = init_if_needed()
+            try:
+                rid = save_flows_snapshot(con, snap)
+                audit_log(con, "FLOWS_FETCHED",
+                          f"#{rid} {snap.snapshot_date} | {snap.signal_strength()}")
+                out["flows"] = snap.signal_strength()
+            finally:
+                con.close()
+    except Exception as e:
+        out["flows_error"] = str(e)
+
+    return out
 
 
 def step_regime() -> dict:
