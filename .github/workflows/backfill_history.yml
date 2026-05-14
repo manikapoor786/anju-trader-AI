@@ -52,6 +52,8 @@ jobs:
       - name: Backfill bhavcopy
         env:
           BACKFILL_DAYS: ${{ inputs.days }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN_AI }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID_AI }}
         run: |
           python - <<'PY'
           import os, time, requests
