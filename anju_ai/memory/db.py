@@ -48,8 +48,15 @@ MIGRATIONS_DIR       = Path(__file__).resolve().parent / "migrations"
 
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     """Open a memory.db connection with WAL + sensible defaults.
-    Always run `apply_migrations(con)` once after opening for the first time."""
-    path = Path(db_path) if db_path else MEMORY_DB_PATH
+    Always run `apply_migrations(con)` once after opening for the first time.
+
+    Re-resolves the path on each call so changing $ANJU_MEMORY_DB at runtime
+    (e.g. in tests) takes effect immediately. MEMORY_DB_PATH module constant
+    is kept for backward compatibility but no longer authoritative."""
+    if db_path:
+        path = Path(db_path)
+    else:
+        path = _resolve_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, timeout=30, isolation_level=None)
     con.row_factory = sqlite3.Row

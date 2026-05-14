@@ -113,3 +113,54 @@ def test_wal_mode_set(db_path):
     mode = con.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
     con.close()
+
+
+def test_regime_upsert_does_not_break_fk(db_path):
+    """Regression: morning_scan re-runs in the same day must upsert the
+    regime_snapshots row WITHOUT breaking FK constraints on signals that
+    already reference it. INSERT OR REPLACE would DELETE+INSERT which
+    violates FK; ON CONFLICT DO UPDATE preserves the row id."""
+    con = init_if_needed(db_path)
+    # First detect: insert today's regime
+    con.execute("""INSERT INTO regime_snapshots
+        (snapshot_date, state, min_score, nifty_close, payload_json)
+        VALUES ('2026-05-14', 'Trending', 6, 22000.0, '{}')""")
+    regime_id = con.execute(
+        "SELECT id FROM regime_snapshots WHERE snapshot_date='2026-05-14'"
+    ).fetchone()["id"]
+
+    # Insert a child signal referencing this regime
+    con.execute("""INSERT INTO signals
+        (signal_date, symbol, horizon, regime_id, rule_score, final_score,
+         verdict, entry_price, suggested_stop, suggested_qty, breakdown_json)
+        VALUES ('2026-05-14', 'RELIANCE', 'SWING', ?, 12.0, 12.0, 'WATCH',
+                1400.0, 1350.0, 50, '{}')""", (regime_id,))
+
+    # Second detect (intraday re-run) — UPSERT, FK preserved
+    con.execute(
+        """INSERT INTO regime_snapshots
+              (snapshot_date, state, min_score, nifty_close, payload_json)
+           VALUES ('2026-05-14', 'Volatile', 8, 21900.0, '{}')
+           ON CONFLICT(snapshot_date) DO UPDATE SET
+              state = excluded.state,
+              min_score = excluded.min_score,
+              nifty_close = excluded.nifty_close"""
+    )
+
+    # Row id is unchanged, FK still valid, state updated
+    new_regime_id = con.execute(
+        "SELECT id FROM regime_snapshots WHERE snapshot_date='2026-05-14'"
+    ).fetchone()["id"]
+    assert new_regime_id == regime_id
+
+    state = con.execute(
+        "SELECT state FROM regime_snapshots WHERE id=?", (regime_id,)
+    ).fetchone()["state"]
+    assert state == "Volatile"
+
+    # Child signal still reachable via its FK
+    sig = con.execute(
+        "SELECT verdict FROM signals WHERE regime_id=?", (regime_id,)
+    ).fetchone()
+    assert sig["verdict"] == "WATCH"
+    con.close()

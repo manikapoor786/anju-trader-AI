@@ -148,14 +148,27 @@ def step_regime() -> dict:
     reg = detect_regime(quiet=True)
     con = init_if_needed()
     try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        # UPSERT, not INSERT-OR-REPLACE. INSERT-OR-REPLACE does DELETE+INSERT,
+        # which violates FK when child rows in signals already reference this
+        # regime_snapshots row. UPSERT updates in place — FKs survive.
         con.execute(
-            """INSERT OR REPLACE INTO regime_snapshots
+            """INSERT INTO regime_snapshots
                   (snapshot_date, state, min_score, nifty_close, nifty_ma20,
                    nifty_ma50, nifty_ma200, breadth_pct, vol_10d_pct, payload_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(snapshot_date) DO UPDATE SET
+                  state         = excluded.state,
+                  min_score     = excluded.min_score,
+                  nifty_close   = excluded.nifty_close,
+                  nifty_ma20    = excluded.nifty_ma20,
+                  nifty_ma50    = excluded.nifty_ma50,
+                  nifty_ma200   = excluded.nifty_ma200,
+                  breadth_pct   = excluded.breadth_pct,
+                  vol_10d_pct   = excluded.vol_10d_pct,
+                  payload_json  = excluded.payload_json""",
             (
-                datetime.now().strftime("%Y-%m-%d"),
-                reg["state"], reg["min_score"],
+                today, reg["state"], reg["min_score"],
                 reg["data"].get("price", 0),
                 reg["data"].get("ma20"), reg["data"].get("ma50"),
                 reg["data"].get("ma200"), reg["data"].get("breadth_pct"),
@@ -165,7 +178,7 @@ def step_regime() -> dict:
         )
         rid = con.execute(
             "SELECT id FROM regime_snapshots WHERE snapshot_date = ?",
-            (datetime.now().strftime("%Y-%m-%d"),),
+            (today,),
         ).fetchone()
         regime_id = rid["id"] if rid else None
         audit_log(con, "REGIME_DETECTED",

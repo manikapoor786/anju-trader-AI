@@ -92,7 +92,10 @@ STATES = {
 # Nifty 50 constituents — used for accurate advance/decline breadth.
 _NIFTY50_BREADTH_TICKERS = [
     "RELIANCE.NS","TCS.NS","HDFCBANK.NS","BHARTIARTL.NS","ICICIBANK.NS",
-    "INFOSYS.NS","SBIN.NS","HINDUNILVR.NS","ITC.NS","LT.NS",
+    # NOTE: yfinance ticker is "INFY.NS" not "INFOSYS.NS" — the latter
+    # returns HTTP 404. Original anju-trader regime_detector.py had this bug
+    # masked by the 70% reliability gate.
+    "INFY.NS","SBIN.NS","HINDUNILVR.NS","ITC.NS","LT.NS",
     "KOTAKBANK.NS","AXISBANK.NS","BAJFINANCE.NS","ASIANPAINT.NS","MARUTI.NS",
     "TITAN.NS","SUNPHARMA.NS","ULTRACEMCO.NS","NTPC.NS","ADANIPORTS.NS",
     "WIPRO.NS","HCLTECH.NS","POWERGRID.NS","M&M.NS","NESTLEIND.NS",

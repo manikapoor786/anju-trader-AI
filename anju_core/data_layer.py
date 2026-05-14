@@ -99,7 +99,9 @@ def _warm_nse_session() -> None:
 # ── Database ──────────────────────────────────────────────────────────────────
 
 def _db_connect() -> sqlite3.Connection:
-    con = sqlite3.connect(DB_PATH, timeout=30)
+    # Re-resolve the path on each call so $ANJU_HISTORICAL_DB env var
+    # changes (e.g. in tests) take effect immediately.
+    con = sqlite3.connect(_resolve_db_path(), timeout=30)
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA busy_timeout=30000")
     return con
