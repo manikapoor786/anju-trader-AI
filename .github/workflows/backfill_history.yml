@@ -1,0 +1,99 @@
+name: 📥 Backfill Historical Data
+
+# Trigger from phone when you need a longer history window for backtest.
+# Default 730 days = 2 years. Idempotent — only fetches missing dates.
+# historical.db is stored in Actions cache (free, 10GB) — NOT in git
+# (file would be 50-200MB, too big to commit).
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Calendar days to back-fill (730=2y, 1825=5y, 3650=10y)"
+        required: true
+        default: "730"
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180     # 5-10y can take a while
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+
+      # Restore historical.db from cache if a previous backfill ran
+      - name: Restore historical.db cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/historical.db
+            data/historical.db-shm
+            data/historical.db-wal
+          key: historical-db
+          restore-keys: |
+            historical-db-
+
+      - name: Secrets to .env
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+
+      - name: Backfill bhavcopy
+        env:
+          BACKFILL_DAYS: ${{ inputs.days }}
+        run: |
+          python - <<'PY'
+          import os, time, requests
+          from pathlib import Path
+          from anju_core.data_layer import refresh_daily, _resolve_db_path
+
+          days = int(os.environ.get("BACKFILL_DAYS", "730"))
+          db_path = _resolve_db_path()
+          existing = db_path.stat().st_size if db_path.exists() else 0
+          print(f"Backfilling {days} days into {db_path}")
+          print(f"DB size before: {existing/1024/1024:.1f} MB")
+          t0 = time.time()
+          n = refresh_daily(days_back=days, verbose=True)
+          elapsed = round(time.time() - t0, 1)
+          final_size = db_path.stat().st_size if db_path.exists() else 0
+          print(f"\nInserted {n:,} new rows in {elapsed}s")
+          print(f"DB size after: {final_size/1024/1024:.1f} MB")
+
+          tok = os.getenv("TELEGRAM_BOT_TOKEN", "")
+          chat = os.getenv("TELEGRAM_CHAT_ID", "")
+          if tok and chat:
+              msg = (f"📥 <b>anju-AI · Backfill complete</b>\n"
+                     f"Days requested: <b>{days}</b>\n"
+                     f"New rows: <b>{n:,}</b>\n"
+                     f"DB size: {final_size/1024/1024:.1f} MB\n"
+                     f"Runtime: {elapsed}s\n\n"
+                     f"<i>historical.db is cached on Actions runners. "
+                     f"Backtest (task 1.3) will reuse it via the same cache key.</i>")
+              requests.post(
+                  f"https://api.telegram.org/bot{tok}/sendMessage",
+                  json={"chat_id": chat, "text": msg, "parse_mode": "HTML"},
+                  timeout=15,
+              )
+          PY
+
+      # Save the populated DB to cache so backtest workflows can reuse it
+      - name: Save historical.db to cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/historical.db
+            data/historical.db-shm
+            data/historical.db-wal
+          key: historical-db-${{ github.run_id }}

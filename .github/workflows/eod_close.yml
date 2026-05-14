@@ -1,0 +1,60 @@
+name: 📊 EOD Close (anju-AI)
+
+on:
+  schedule:
+    # 4:00 PM IST = 10:30 UTC, Mon-Fri
+    - cron: "30 10 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      max_hold_days:
+        description: "Force TIME_EXIT after N trading days"
+        required: false
+        default: "90"
+      refresh_data:
+        description: "Refresh bhavcopy before closing"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  eod_close:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - name: Secrets to .env
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+
+      - name: Close outcomes
+        run: |
+          REFRESH_FLAG=""
+          if [ "${{ inputs.refresh_data || 'true' }}" = "true" ]; then
+            REFRESH_FLAG="--refresh-data"
+          fi
+          python -m anju_ai.loops.eod_close \
+            --max-hold "${{ inputs.max_hold_days || '90' }}" \
+            $REFRESH_FLAG
+
+      - name: Persist memory.db
+        run: |
+          git config user.name  "anju-AI-bot"
+          git config user.email "anju-AI-bot@users.noreply.github.com"
+          git add data/memory.db || true
+          git diff --staged --quiet || git commit -m "chore: eod_close $(date -u +'%Y-%m-%d') [skip ci]"
+          git push || true

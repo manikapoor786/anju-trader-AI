@@ -59,7 +59,7 @@ A living document. Updated at the end of every phase. Each phase has a
 
 | # | Task | Status | Notes |
 |---|---|---|---|
-| 1.1 | `anju_ai/tools/outcome_tracker.py` — event-driven (first-touch detection on daily H/L) | ⏳ | Audit finding 3.1 |
+| 1.1 | `anju_ai/tools/outcome_tracker.py` — event-driven (first-touch detection on daily H/L) | ✅ Done | 2026-05-14 · 16 unit tests · gap handling · MFE/MAE · idempotent loop · eod_close.yml + backfill_history.yml |
 | 1.2 | `anju_ai/tools/costs.py` — full Indian retail cost model | ⏳ | Audit finding 3.3 |
 | 1.3 | `anju_ai/tools/backtest.py` — walks daily through historical.db, applies scoring + costs + outcome rules | ⏳ | Audit finding 3.2 |
 | 1.4 | Backtest report: win-rate, expectancy, max DD, Sharpe by score bucket × regime × universe segment | ⏳ | |
