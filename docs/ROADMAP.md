@@ -127,7 +127,7 @@ If backtest fails to clear these bars, **we stop and rethink the scoring before 
 | 3.1 | `anju_ai/loops/eod_postmortem.py` + `agent.post_mortem` (Gemini) | ✅ Done | 2026-05-14 · 10 unit tests · prompt v1 · finds unprocessed outcomes · injects similar past lessons · postmortem.yml 4:30PM IST cron |
 | 3.2 | `anju_ai/loops/weekly_critic.py` + `agent.weekly_critic` (Claude) | ⏳ | Proposes revisions |
 | 3.3 | Telegram interactive: `/approve_<id>` `/reject_<id>` → applies revision via PR | ⏳ | |
-| 3.4 | `anju_ai/loops/anomaly_qa.py` + `agent.anomaly_qa` (Gemini, every 3h) | ⏳ | |
+| 3.4 | `anju_ai/loops/anomaly_qa.py` + `agent.anomaly_qa` (Gemini, every 3h) | ✅ Done | 2026-05-14 · 9 unit tests · prompt v1 · snapshot collectors for workflow/data/regime/signals/traces/positions · anomaly_qa.yml every-3h cron |
 | 3.5 | `anju_ai/loops/deep_review.py` + `agent.deep_review` (Gemini Pro or Claude Haiku) | ⏳ | On-demand from phone |
 | 3.6 | Reasoning-trace audit UI (simple HTML report from memory.db) | ⏳ | |
 | 3.7 | A/B comparison vs anju-trader: cost-adjusted expectancy over rolling 60 days | ⏳ | |

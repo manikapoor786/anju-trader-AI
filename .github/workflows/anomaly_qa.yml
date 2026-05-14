@@ -1,0 +1,47 @@
+name: 🔍 Anomaly QA (anju-AI)
+
+# System self-monitor. Runs every 3 hours. Reads system health stats
+# and asks Gemini Flash to flag anomalies. Only sends Telegram alerts
+# for WARN/CRITICAL — silent on healthy runs.
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print snapshot, skip LLM call"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  anomaly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - name: Secrets to .env
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"            >> .env
+      - name: Run anomaly QA
+        run: |
+          DRY_FLAG=""
+          if [ "${{ inputs.dry_run || 'false' }}" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+          python -m anju_ai.loops.anomaly_qa $DRY_FLAG
