@@ -226,11 +226,31 @@ def test_close_open_outcomes_marks_winner(db_with_open_fill):
     assert res["closed"] == 1
     assert res["still_open"] == 0
 
-    row = con.execute("SELECT outcome_kind, exit_price, net_pnl_pct "
+    row = con.execute("SELECT outcome_kind, exit_price, "
+                      "gross_pnl_paise, costs_total_paise, net_pnl_pct "
                       "FROM outcomes").fetchone()
     assert row["outcome_kind"] == "WIN_T1"
     assert row["exit_price"] == 110
+    # Gross: (110-100) * 10 shares = ₹100 = 10000 paise
+    assert row["gross_pnl_paise"] == 10000
+    # Costs are positive (subtracted from gross)
+    assert row["costs_total_paise"] > 0
+    # Net % < gross % — costs ate some of the win
+    assert row["net_pnl_pct"] < 10.0
+    assert row["net_pnl_pct"] > 0   # still a winner
+
+
+def test_close_open_outcomes_apply_costs_false_keeps_gross(db_with_open_fill):
+    con = db_with_open_fill
+
+    def mock_loader(symbol, days):
+        return make_df([(101, 115, 99, 112)], start="2026-05-16")
+
+    res = close_open_outcomes(con, mock_loader, apply_costs=False)
+    assert res["closed"] == 1
+    row = con.execute("SELECT net_pnl_pct, costs_total_paise FROM outcomes").fetchone()
     assert row["net_pnl_pct"] == 10.0
+    assert row["costs_total_paise"] == 0
 
 
 def test_close_open_outcomes_skips_when_no_data(db_with_open_fill):

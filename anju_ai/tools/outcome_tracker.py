@@ -168,7 +168,8 @@ def _close(inp: TrackInput, kind: str, exit_date, exit_price: float,
 # ── Memory-DB integration ─────────────────────────────────────────────────────
 
 def close_open_outcomes(con, ohlcv_loader, max_hold_days: int = 90,
-                        today: str | None = None) -> dict:
+                        today: str | None = None,
+                        apply_costs: bool = True) -> dict:
     """Close all open fills (no outcome row yet) by tracking forward through
     historical OHLCV. Used by the EOD close loop and the backtest replay.
 
@@ -179,11 +180,14 @@ def close_open_outcomes(con, ohlcv_loader, max_hold_days: int = 90,
         max_hold_days: force TIME_EXIT after this many trading days
         today: 'YYYY-MM-DD' — only consider data up to this date (for backtest
             replay). None = no upper bound (use everything available).
+        apply_costs: when True (default), subtract round-trip costs from
+            gross P&L using anju_ai.tools.costs. When False, gross = net
+            (useful for sanity checks).
 
     Returns dict with counts: scanned, closed, still_open.
     """
-    from datetime import datetime
-    import json
+    from anju_ai.tools.costs import net_pnl
+    from anju_ai.tools.paper_fill import classify_segment
 
     open_fills = con.execute("""
         SELECT f.id        AS fill_id,
@@ -234,18 +238,35 @@ def close_open_outcomes(con, ohlcv_loader, max_hold_days: int = 90,
             still_open += 1
             continue
 
+        # Apply round-trip costs (brokerage + STT + slippage etc).
+        # Segment defaults to midcap — Phase 2 wires symbol-aware classification.
+        if apply_costs and result.exit_price is not None:
+            seg = classify_segment(f["fill_price"], avg_volume_10d=None)
+            np_ = net_pnl(
+                buy_price=f["fill_price"], sell_price=result.exit_price,
+                qty=f["fill_qty"], segment=seg,
+            )
+            costs_paise = int(round(np_["costs_inr"] * 100))
+            net_pnl_paise = int(round(np_["net_inr"] * 100))
+            net_pnl_pct_v = float(np_["net_pct"])
+        else:
+            costs_paise = 0
+            net_pnl_paise = result.gross_pnl_paise
+            net_pnl_pct_v = result.gross_pnl_pct
+
         con.execute("""
             INSERT INTO outcomes
                 (fill_id, outcome_date, outcome_kind, exit_price, days_held,
                  gross_pnl_paise, costs_total_paise, net_pnl_paise,
                  net_pnl_pct, max_favourable_excursion, max_adverse_excursion)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             f["fill_id"], result.exit_date, result.outcome_kind,
             result.exit_price, result.days_held,
             result.gross_pnl_paise,
-            result.gross_pnl_paise,   # net = gross until 1.2 costs land
-            result.gross_pnl_pct,
+            costs_paise,
+            net_pnl_paise,
+            net_pnl_pct_v,
             result.max_favourable_excursion_pct,
             result.max_adverse_excursion_pct,
         ))
