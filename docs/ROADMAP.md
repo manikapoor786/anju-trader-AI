@@ -124,7 +124,7 @@ If backtest fails to clear these bars, **we stop and rethink the scoring before 
 
 | # | Task | Status | Notes |
 |---|---|---|---|
-| 3.1 | `anju_ai/loops/eod_postmortem.py` + `agent.post_mortem` (Gemini) | ⏳ | LLM writes lessons.db |
+| 3.1 | `anju_ai/loops/eod_postmortem.py` + `agent.post_mortem` (Gemini) | ✅ Done | 2026-05-14 · 10 unit tests · prompt v1 · finds unprocessed outcomes · injects similar past lessons · postmortem.yml 4:30PM IST cron |
 | 3.2 | `anju_ai/loops/weekly_critic.py` + `agent.weekly_critic` (Claude) | ⏳ | Proposes revisions |
 | 3.3 | Telegram interactive: `/approve_<id>` `/reject_<id>` → applies revision via PR | ⏳ | |
 | 3.4 | `anju_ai/loops/anomaly_qa.py` + `agent.anomaly_qa` (Gemini, every 3h) | ⏳ | |

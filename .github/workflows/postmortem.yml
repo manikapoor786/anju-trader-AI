@@ -1,0 +1,49 @@
+name: 📝 EOD Post-Mortem (anju-AI)
+
+# Runs after eod_close.yml. For each trade closed today, the LLM writes
+# a structured lesson to memory.lessons. Uses Gemini Flash (free tier).
+
+on:
+  schedule:
+    # 4:30 PM IST = 11:00 UTC, Mon-Fri (30 min after eod_close)
+    - cron: "0 11 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max outcomes to review"
+        required: false
+        default: "20"
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  postmortem:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - name: Secrets to .env
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"            >> .env
+      - name: Run post-mortem
+        run: |
+          python -m anju_ai.loops.eod_postmortem \
+            --limit "${{ inputs.limit || '20' }}"
+      - name: Persist memory.db
+        run: |
+          git config user.name  "anju-AI-bot"
+          git config user.email "anju-AI-bot@users.noreply.github.com"
+          git add data/memory.db || true
+          git diff --staged --quiet || git commit -m "chore: postmortem $(date -u +'%Y-%m-%d') [skip ci]"
+          git push || true
