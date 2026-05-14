@@ -178,6 +178,22 @@ def step_refresh() -> dict:
     except Exception as e:
         out["deals_error"] = str(e)
 
+    # Fetch + persist last 7 days of insider/SAST disclosures (passive).
+    try:
+        from anju_ai.tools.insider import fetch_insider, save_insider
+        txs = fetch_insider()
+        if txs:
+            con = init_if_needed()
+            try:
+                rids = save_insider(con, txs)
+                audit_log(con, "INSIDER_FETCHED",
+                          f"{len(txs)} transactions across {len(rids)} dates")
+                out["insider"] = f"{len(txs)} transactions"
+            finally:
+                con.close()
+    except Exception as e:
+        out["insider_error"] = str(e)
+
     return out
 
 
