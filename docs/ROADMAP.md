@@ -97,7 +97,7 @@ If backtest fails to clear these bars, **we stop and rethink the scoring before 
 | 2.2 | `anju_ai/tools/deals.py` — bulk + block deals daily ingest | ✅ Done | 2026-05-14 · 20 unit tests · JSON merge with dedupe · wired into morning_scan · passive collection |
 | 2.3 | `anju_ai/tools/insider.py` — promoter + insider (SAST) ingest | ✅ Done | 2026-05-14 · 19 unit tests · grouped-by-date persistence · insider_signal_for_symbol aggregator · wired into morning_scan |
 | 2.4 | Backtest flows as scoring features → measure expectancy lift | ⏳ | |
-| 2.5 | `anju_ai/tools/catalyst.py` + LLM client (Gemini Flash) — daily news/filings scan per candidate | ⏳ | Audit finding 3.9 |
+| 2.5 | `anju_ai/tools/catalyst.py` + LLM client (Gemini Flash) — daily news/filings scan per candidate | ✅ Done | 2026-05-14 · 15 unit tests · prompt v1 · apply_catalyst_to_score with weight=0 calibration default |
 | 2.6 | Wire `agent.catalyst_review` loop (see AGENT_PROTOCOL §2.1) | ⏳ | First real LLM use |
 | 2.7 | `anju_ai/tools/options.py` — fetch IV percentile, recommend ATM calls when conviction high + IV low | ⏳ | Audit finding 3.10 |
 | 2.8 | Concentration enforcer: max 15, min 5 positions; pyramiding on HERO | ⏳ | Audit finding 3.12 |
