@@ -86,3 +86,63 @@ def get_universe(name: str) -> list[str]:
             f"Unknown universe '{name}'. Known: {sorted(UNIVERSES.keys())}"
         )
     return list(UNIVERSES[name])
+
+
+def get_universe_at_date(name: str, as_of_date: str,
+                         ohlcv_loader=None) -> list[str]:
+    """Return universe symbols that were TRADEABLE on `as_of_date`.
+
+    Drops survivorship bias by intersecting the static universe list with
+    symbols that had bhavcopy data on that date. Stocks delisted before
+    the date OR not yet listed are excluded.
+
+    Args:
+        name:        universe name (e.g. 'nifty100')
+        as_of_date:  'YYYY-MM-DD'
+        ohlcv_loader: callable(symbol, days) -> DataFrame. Defaults to
+            anju_core.data_layer.get_ohlcv. Tests inject a mock.
+
+    Returns: list of symbols that had data on/around as_of_date.
+
+    Note: this is an APPROXIMATION of true point-in-time membership.
+    True NSE constituent history (e.g. "was XYZ in NIFTY 500 on date Y?")
+    requires monthly archive scraping — Phase 2 enhancement if needed.
+    For Phase 1 backtests this is sufficient to drop dead symbols.
+    """
+    base = get_universe(name)
+
+    if ohlcv_loader is None:
+        from anju_core.data_layer import get_ohlcv as _g
+        ohlcv_loader = _g
+
+    import pandas as pd
+    target = pd.to_datetime(as_of_date)
+
+    out: list[str] = []
+    for sym in base:
+        try:
+            df = ohlcv_loader(sym, days=10)
+            if df is None or df.empty:
+                continue
+            df.index = pd.to_datetime(df.index)
+            # Symbol must have at least one bar within ±10 days of target.
+            window = (df.index >= target - pd.Timedelta(days=10)) & \
+                     (df.index <= target + pd.Timedelta(days=10))
+            if window.any():
+                out.append(sym)
+        except Exception:
+            continue
+    return out
+
+
+def get_universe_with_cache(name: str, as_of_date: str,
+                            cache: dict | None = None,
+                            ohlcv_loader=None) -> list[str]:
+    """Same as get_universe_at_date but memoised by date.
+    Used by backtest engine to avoid re-checking the same date repeatedly."""
+    if cache is None:
+        cache = {}
+    key = (name, as_of_date)
+    if key not in cache:
+        cache[key] = get_universe_at_date(name, as_of_date, ohlcv_loader)
+    return list(cache[key])

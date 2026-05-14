@@ -64,7 +64,7 @@ A living document. Updated at the end of every phase. Each phase has a
 | 1.3 | `anju_ai/tools/backtest.py` — walks daily through historical.db, applies scoring + costs + outcome rules | ✅ Done | 2026-05-14 · 10 unit tests · walk-forward · run namespacing via backtest_runs table |
 | 1.4 | Backtest report: win-rate, expectancy, max DD, Sharpe by score bucket × regime × universe segment | ✅ Done | 2026-05-14 · part of 1.3 — render_report + verdict + Telegram HTML |
 | 1.5 | Cut any score bucket with cost-adjusted expectancy ≤ 0 | ⏳ | |
-| 1.6 | Survivorship-bias-clean universe loader (delisted stocks included) | ⏳ | Audit finding 3.11 |
+| 1.6 | Survivorship-bias-clean universe loader (delisted stocks included) | ✅ Done | 2026-05-14 · 4 unit tests · get_universe_at_date filters via bhavcopy availability · memoised cache helper for backtest |
 | 1.7 | Unit tests for outcome_tracker, costs, backtest | ⏳ | Mandatory |
 | 1.8 | Replay anju-trader's last 30 days through anju-trader-AI rule engine → comparison report | ⏳ | |
 
