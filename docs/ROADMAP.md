@@ -61,8 +61,8 @@ A living document. Updated at the end of every phase. Each phase has a
 |---|---|---|---|
 | 1.1 | `anju_ai/tools/outcome_tracker.py` — event-driven (first-touch detection on daily H/L) | ✅ Done | 2026-05-14 · 16 unit tests · gap handling · MFE/MAE · idempotent loop · eod_close.yml + backfill_history.yml |
 | 1.2 | `anju_ai/tools/costs.py` — full Indian retail cost model | ✅ Done | 2026-05-14 · 16 unit tests · wired into outcome closure · brokerage+STT+slippage+GST+stamp+SEBI+exchange |
-| 1.3 | `anju_ai/tools/backtest.py` — walks daily through historical.db, applies scoring + costs + outcome rules | ⏳ | Audit finding 3.2 |
-| 1.4 | Backtest report: win-rate, expectancy, max DD, Sharpe by score bucket × regime × universe segment | ⏳ | |
+| 1.3 | `anju_ai/tools/backtest.py` — walks daily through historical.db, applies scoring + costs + outcome rules | ✅ Done | 2026-05-14 · 10 unit tests · walk-forward · run namespacing via backtest_runs table |
+| 1.4 | Backtest report: win-rate, expectancy, max DD, Sharpe by score bucket × regime × universe segment | ✅ Done | 2026-05-14 · part of 1.3 — render_report + verdict + Telegram HTML |
 | 1.5 | Cut any score bucket with cost-adjusted expectancy ≤ 0 | ⏳ | |
 | 1.6 | Survivorship-bias-clean universe loader (delisted stocks included) | ⏳ | Audit finding 3.11 |
 | 1.7 | Unit tests for outcome_tracker, costs, backtest | ⏳ | Mandatory |
