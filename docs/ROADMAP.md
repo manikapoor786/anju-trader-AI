@@ -128,7 +128,7 @@ If backtest fails to clear these bars, **we stop and rethink the scoring before 
 | 3.2 | `anju_ai/loops/weekly_critic.py` + `agent.weekly_critic` (Claude) | ⏳ | Proposes revisions |
 | 3.3 | Telegram interactive: `/approve_<id>` `/reject_<id>` → applies revision via PR | ⏳ | |
 | 3.4 | `anju_ai/loops/anomaly_qa.py` + `agent.anomaly_qa` (Gemini, every 3h) | ✅ Done | 2026-05-14 · 9 unit tests · prompt v1 · snapshot collectors for workflow/data/regime/signals/traces/positions · anomaly_qa.yml every-3h cron |
-| 3.5 | `anju_ai/loops/deep_review.py` + `agent.deep_review` (Gemini Pro or Claude Haiku) | ⏳ | On-demand from phone |
+| 3.5 | `anju_ai/loops/deep_review_agent.py` + `agent.deep_review` (Gemini Pro) | ✅ Done | 2026-05-14 · 12 unit tests · prompt v1 · bull/bear/base/levels/options/confidence · wired into manual_review.yml |
 | 3.6 | Reasoning-trace audit UI (simple HTML report from memory.db) | ⏳ | |
 | 3.7 | A/B comparison vs anju-trader: cost-adjusted expectancy over rolling 60 days | ⏳ | |
 | 3.8 | Bear-regime defensive playbook + short F&O setups | ⏳ | Audit finding 3.7 |

@@ -48,10 +48,11 @@ jobs:
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"            >> .env
           echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"      >> .env
 
-      - name: Deep review
+      - name: Deep review (LLM agent)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python -m anju_ai.loops.deep_review \
+          python -m anju_ai.loops.deep_review_agent \
             --symbol "${{ inputs.symbol }}" \
             --horizon "${{ inputs.horizon }}" \
-            --question "${{ inputs.question }}" \
-            --model "${{ inputs.model_preference }}"
+            --question "${{ inputs.question }}"
