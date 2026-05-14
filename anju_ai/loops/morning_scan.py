@@ -120,15 +120,23 @@ def _split_text(text: str, limit: int) -> list[str]:
 
 def _compute_qty(price: float, stop: float | None, total_capital: float = CAPITAL_INR,
                  risk_pct: float = BASE_RISK_PCT,
-                 max_pos_pct: float = MAX_POSITION_PCT) -> int:
-    """Position size for one trade — capped by max position percentage."""
+                 max_pos_pct: float = MAX_POSITION_PCT,
+                 correlation_multiplier: float = 1.0) -> int:
+    """Position size for one trade — capped by max position percentage.
+
+    Correlation multiplier (Phase 2.10): scales qty down when this signal
+    is highly correlated with open positions. Default 1.0 = no effect.
+    Phase 2.10 default config sets penalty_strength=0 so this stays 1.0
+    until backtest validates correlation-aware sizing adds expectancy.
+    """
     if price <= 0:
         return 0
     risk_amount = total_capital * (risk_pct / 100)
     risk_per_share = max(price - (stop or price * 0.95), price * 0.005)
     qty_by_risk = int(risk_amount / risk_per_share)
     qty_by_cap  = int((total_capital * max_pos_pct / 100) / price)
-    return max(0, min(qty_by_risk, qty_by_cap))
+    base_qty = max(0, min(qty_by_risk, qty_by_cap))
+    return int(base_qty * max(0.1, min(1.0, correlation_multiplier)))
 
 
 # ── Pipeline steps ────────────────────────────────────────────────────────────

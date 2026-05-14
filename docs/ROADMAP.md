@@ -165,7 +165,7 @@ If backtest fails to clear these bars, **we stop and rethink the scoring before 
 
 | # | Task | Status | Notes |
 |---|---|---|---|
-| 4.1 | Migration of `portfolio.json` from anju-trader → anju-trader-AI | ⏳ | |
+| 4.1 | Migration of `portfolio.json` from anju-trader → anju-trader-AI | ✅ Done | 2026-05-14 · 14 unit tests · `scripts/migrate_anju_portfolio.py` · idempotent · dry-run by default · `--force` flag for existing-signals override |
 | 4.2 | Switch live capital flag: `config/runtime.yaml: live=true` | ⏳ | |
 | 4.3 | Disable anju-trader workflows (don't delete — archive for 90 days) | ⏳ | |
 | 4.4 | First week of live: paper + live mirror, daily comparison | ⏳ | Belt + suspenders |
