@@ -69,7 +69,8 @@ class ClaudeClient:
     name = "claude"
 
     def __init__(self, api_key: str | None = None, http_post=None):
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
+        # api_key=None means "load from env"; api_key="" means "force empty"
+        self.api_key = os.getenv("ANTHROPIC_API_KEY", "") if api_key is None else api_key
         self._post = http_post or self._real_post
 
     def _real_post(self, url: str, *, json=None, headers=None, timeout=30.0):

@@ -80,7 +80,9 @@ class GeminiClient:
 
     def __init__(self, api_key: str | None = None,
                  http_post=None):
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        # api_key=None means "load from env"; api_key="" means "force empty"
+        # (used by tests). Distinguish the two with an explicit None check.
+        self.api_key = os.getenv("GEMINI_API_KEY", "") if api_key is None else api_key
         # Optional test override — must accept (url, json, params, timeout)
         self._post = http_post or self._real_post
 
