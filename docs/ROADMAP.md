@@ -131,8 +131,8 @@ If backtest fails to clear these bars, **we stop and rethink the scoring before 
 | 3.5 | `anju_ai/loops/deep_review_agent.py` + `agent.deep_review` (Gemini Pro) | ✅ Done | 2026-05-14 · 12 unit tests · prompt v1 · bull/bear/base/levels/options/confidence · wired into manual_review.yml |
 | 3.6 | Reasoning-trace audit UI (simple HTML report from memory.db) | ⏳ | |
 | 3.7 | A/B comparison vs anju-trader: cost-adjusted expectancy over rolling 60 days | ⏳ | |
-| 3.8 | Bear-regime defensive playbook + short F&O setups | ⏳ | Audit finding 3.7 |
-| 3.9 | Tax-aware exit logic (LTCG deferral when within 30 days of 365-day mark) | ⏳ | |
+| 3.8 | Bear-regime defensive playbook + short F&O setups | ✅ Done | 2026-05-14 · 15 unit tests · curated defensive universe · RS-driven scoring · long exposure capped at 30% |
+| 3.9 | Tax-aware exit logic (LTCG deferral when within 30 days of 365-day mark) | ✅ Done | 2026-05-14 · 14 unit tests · STOP/TARGET overrides tax · ₹1L exemption respected · STCG 20% / LTCG 12.5% |
 
 ### Definition of Done
 
