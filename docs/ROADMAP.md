@@ -32,8 +32,8 @@ A living document. Updated at the end of every phase. Each phase has a
 | 0.14 | Fork `regime_detector.py` into `anju_core/regime.py` | ✅ Done | 2026-05-14 · 12 unit tests on _classify logic |
 | 0.15a | Fork stockview indicators → `anju_core/indicators.py` | ✅ Done | 2026-05-14 · 13 unit tests on synthetic data |
 | 0.15b | Port scoring engine with Pydantic types → `anju_ai/tools/scoring.py` | ✅ Done | 2026-05-14 · 8 unit tests · audit-invariant breakdown sums to score |
-| 0.16 | Stub `anju_ai/tools/paper_fill.py` | ⏳ |
-| 0.17 | Stub `anju_ai/memory/db.py` with schema migrations | ⏳ |
+| 0.16 | `anju_ai/tools/paper_fill.py` with slippage model | ✅ Done | 2026-05-14 · 6 unit tests · segment + size-impact scaling |
+| 0.17 | `anju_ai/memory/db.py` + schema migrations | ✅ Done | 2026-05-14 · 7 unit tests · 12 tables + signals_current view + audit ledger |
 | 0.18 | Wire `anju_ai/loops/morning_scan.py` end-to-end (rule-based only, no LLM) | ⏳ |
 | 0.19 | First Telegram digest from anju-trader-AI to a *new* Telegram chat | ⏳ |
 | 0.20 | A/B comparison workflow stub | ⏳ |
