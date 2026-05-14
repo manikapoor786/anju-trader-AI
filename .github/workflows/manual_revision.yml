@@ -1,0 +1,58 @@
+name: ✅ Approve/Reject Revision
+
+# Triggered from phone via GitHub mobile Actions tab.
+# Enter the revision_id from a weekly_critic Telegram message + action.
+# Workflow updates memory.db revisions table + applies PARAMETER changes
+# to config/model_params.json (committed back).
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision_id:
+        description: "Revision id (from weekly_critic Telegram message)"
+        required: true
+      action:
+        description: "approve | reject"
+        required: true
+        default: "approve"
+        type: choice
+        options: [approve, reject]
+      reason:
+        description: "Optional reason (only for reject)"
+        required: false
+        default: ""
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - name: Secrets to .env
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+      - name: Apply revision
+        run: |
+          python -m anju_ai.loops.apply_revision \
+            --id "${{ inputs.revision_id }}" \
+            --action "${{ inputs.action }}" \
+            --reason "${{ inputs.reason }}"
+      - name: Persist memory.db + model_params.json
+        run: |
+          git config user.name  "anju-AI-bot"
+          git config user.email "anju-AI-bot@users.noreply.github.com"
+          git add data/memory.db config/model_params.json || true
+          git diff --staged --quiet || git commit -m "chore: revision ${{ inputs.action }} ${{ inputs.revision_id }} [skip ci]"
+          git push || true
