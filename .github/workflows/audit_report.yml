@@ -1,0 +1,42 @@
+name: 📒 Audit Report (anju-AI)
+
+# On-demand audit summary. Reads memory.db for everything anju-AI did
+# in the window and sends a structured Telegram report. Useful for
+# weekly review and post-deploy sanity checks.
+
+on:
+  schedule:
+    # Saturday 11 AM IST = 5:30 UTC — alongside weekly_critic prep
+    - cron: "30 5 * * 6"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Lookback window (days)"
+        required: true
+        default: "7"
+
+env:
+  PYTHONUNBUFFERED: "1"
+  TZ: "Asia/Kolkata"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - name: Secrets to .env
+        run: |
+          echo "TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN_AI }}" >> .env
+          echo "TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID_AI }}"     >> .env
+      - name: Run audit report
+        run: |
+          python -m anju_ai.loops.audit_report \
+            --days "${{ inputs.days || '7' }}"
