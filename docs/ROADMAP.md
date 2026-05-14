@@ -125,7 +125,7 @@ If backtest fails to clear these bars, **we stop and rethink the scoring before 
 | # | Task | Status | Notes |
 |---|---|---|---|
 | 3.1 | `anju_ai/loops/eod_postmortem.py` + `agent.post_mortem` (Gemini) | ✅ Done | 2026-05-14 · 10 unit tests · prompt v1 · finds unprocessed outcomes · injects similar past lessons · postmortem.yml 4:30PM IST cron |
-| 3.2 | `anju_ai/loops/weekly_critic.py` + `agent.weekly_critic` (Claude) | ⏳ | Proposes revisions |
+| 3.2 | `anju_ai/loops/weekly_critic.py` + `agent.weekly_critic` (Claude) | ✅ Done | 2026-05-14 · 13 unit tests · prompt v1 · expectancy slices · persists revisions with AWAITING_APPROVAL or BACKTESTING status · weekly_critic.yml Sunday 9 AM cron |
 | 3.3 | Telegram interactive: `/approve_<id>` `/reject_<id>` → applies revision via PR | ⏳ | |
 | 3.4 | `anju_ai/loops/anomaly_qa.py` + `agent.anomaly_qa` (Gemini, every 3h) | ✅ Done | 2026-05-14 · 9 unit tests · prompt v1 · snapshot collectors for workflow/data/regime/signals/traces/positions · anomaly_qa.yml every-3h cron |
 | 3.5 | `anju_ai/loops/deep_review_agent.py` + `agent.deep_review` (Gemini Pro) | ✅ Done | 2026-05-14 · 12 unit tests · prompt v1 · bull/bear/base/levels/options/confidence · wired into manual_review.yml |
