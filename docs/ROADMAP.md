@@ -102,7 +102,7 @@ If backtest fails to clear these bars, **we stop and rethink the scoring before 
 | 2.7 | `anju_ai/tools/options.py` — fetch IV percentile, recommend ATM calls when conviction high + IV low | ✅ Done | 2026-05-14 · 24 unit tests · iv_history migration 003 · evaluate_leverage gated by fno_enabled flag |
 | 2.8 | Concentration enforcer: max 15, min 5 positions; pyramiding on HERO | ✅ Done | 2026-05-14 · 13 unit tests · enforce_concentration with NEW_OPEN/PYRAMID/SKIP actions · config-driven via ConcentrationConfig |
 | 2.9 | `anju_ai/loops/intraday_monitor.py` — every 30 min mkt hours | ✅ Done | 2026-05-14 · 13 unit tests · classify_alert routing (CRITICAL/WARN/INFO) · is_market_open + intraday.yml cron 15,45 4-9 UTC |
-| 2.10 | `anju_ai/tools/correlation.py` — penalise sizing when new signal correlates with open positions | ⏳ | |
+| 2.10 | `anju_ai/tools/correlation.py` — penalise sizing when new signal correlates with open positions | ✅ Done | 2026-05-14 · 18 unit tests · pairwise corr matrix · portfolio_concentration_score · penalty_strength=0 default until backtest validates |
 
 ### Definition of Done
 
