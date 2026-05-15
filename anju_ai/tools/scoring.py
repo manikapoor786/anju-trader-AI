@@ -343,6 +343,21 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
     elif has_dryup and ma20 > 0:
         entry_model = "📈 Momentum Entry"
 
+    # PHASE 1.5 PART B+C: filter and bonus for clean entry models.
+    # The first backtest showed signals with empty entry_model (645/1015 = 64%
+    # of trades) had -0.596% net expectancy — they're noise. Clean
+    # entry-model signals (especially Breakout/Retest) had +0.165% net.
+    # Reject empty-model signals AND award +2 score bonus when a model is set.
+    if not entry_model:
+        # Don't fully reject — the rule-based score may still be useful for
+        # WATCH context. Apply a penalty instead so the BUY threshold (15)
+        # is virtually unreachable without a clean entry pattern.
+        score += _add(breakdown, "no_entry_model_penalty", -3, tags,
+                      "⚠️ No clear setup")
+    else:
+        score += _add(breakdown, "clean_entry_model_bonus", 2, tags,
+                      "✨ Clean setup")
+
     # ── Weinstein stage detection ────────────────────────────────
     stage = 0
     stage_label = ""

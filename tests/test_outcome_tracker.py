@@ -27,13 +27,15 @@ def make_df(bars: list[tuple[float, float, float, float]],
 # ── First-touch detection ─────────────────────────────────────────────────────
 
 def test_win_t1_on_first_touch():
-    # Entry 100, stop 95, t1 110. Day 1 high = 112 → WIN_T1 at 110
+    # Phase 1.5 two-stage exit: first half captured at T1=110, second
+    # half rides with breakeven stop. Only 1 bar available so second
+    # half closes at last_close=108. Blended exit = (110+108)/2 = 109.
     df = make_df([(101, 112, 99, 108)])
     out = track_outcome(TrackInput(
         entry_price=100, qty=10, stop=95, t1=110, df_post_fill=df,
     ))
     assert out.outcome_kind == "WIN_T1"
-    assert out.exit_price == 110
+    assert out.exit_price == 109   # blended: (110 + 108) / 2
     assert out.days_held == 1
     assert out.is_closed
 
@@ -50,13 +52,15 @@ def test_loss_stop_on_first_touch():
 
 
 def test_t2_wins_over_t1_when_both_hit_same_bar():
+    # Both T1 (110) and T2 (120) hit same bar. First half at T1, second
+    # half at T2 → blended (110 + 120) / 2 = 115.
     df = make_df([(101, 122, 99, 120)])
     out = track_outcome(TrackInput(
         entry_price=100, qty=10, stop=95, t1=110, t2=120,
         df_post_fill=df,
     ))
     assert out.outcome_kind == "WIN_T2"
-    assert out.exit_price == 120
+    assert out.exit_price == 115   # blended
 
 
 def test_conservative_tiebreak_stop_wins_when_both_hit():
@@ -70,6 +74,8 @@ def test_conservative_tiebreak_stop_wins_when_both_hit():
 
 
 def test_walks_multiple_days_until_touch():
+    # T1 hit on day 3 (high 113 >= 110). First half captured at T1=110.
+    # No more bars → second half closes at last_close=110. Blended=110.
     bars = [
         (101, 105, 99, 103),   # day 1 — no touch
         (103, 108, 101, 106),  # day 2 — no touch
@@ -81,6 +87,7 @@ def test_walks_multiple_days_until_touch():
     ))
     assert out.outcome_kind == "WIN_T1"
     assert out.days_held == 3
+    assert out.exit_price == 110   # blended (110+110)/2 = 110
 
 
 # ── Gap handling ──────────────────────────────────────────────────────────────
@@ -96,13 +103,14 @@ def test_gap_down_below_stop_exits_at_open():
 
 
 def test_gap_up_above_target_exits_at_open():
-    # Good news → gap up to 115, above t1 110
+    # Gap-up above T1 → first half at OPEN=115 (favourable to T1=110).
+    # Second half rides, no more bars → last_close=116. Blended=(115+116)/2=115.5
     df = make_df([(115, 117, 113, 116)])
     out = track_outcome(TrackInput(
         entry_price=100, qty=10, stop=95, t1=110, df_post_fill=df,
     ))
     assert out.outcome_kind == "WIN_T1"
-    assert out.exit_price == 115   # at the open (favourable)
+    assert out.exit_price == 115.5   # blended
 
 
 def test_gap_up_above_t2_classifies_as_t2():
@@ -175,13 +183,93 @@ def test_mfe_and_mae_tracked():
 # ── P&L computation ───────────────────────────────────────────────────────────
 
 def test_gross_pnl_paise_correct():
+    # Two-stage: T1 hit at 110, no more bars → second half at last_close=108.
+    # Blended exit = (110+108)/2 = 109. Gain = (109-100)*50 = ₹450 = 45000 paise.
     df = make_df([(101, 112, 99, 108)])
     out = track_outcome(TrackInput(
         entry_price=100, qty=50, stop=95, t1=110, df_post_fill=df,
     ))
-    # WIN at 110, entry 100, qty 50 → +10 * 50 = +500 ₹ = 50000 paise
-    assert out.gross_pnl_paise == 50000
-    assert out.gross_pnl_pct == 10.0
+    assert out.gross_pnl_paise == 45000
+    assert out.gross_pnl_pct == 9.0
+
+
+# ── Phase 1.5 two-stage exit ────────────────────────────────────────────────
+
+def test_two_stage_t1_then_t2_blended_exit():
+    """T1 hit day 1, second half runs to T2 day 3. Both halves contribute."""
+    bars = [
+        (101, 112, 99, 111),    # day 1: T1=110 hit, first half at 110
+        (111, 115, 109, 114),   # day 2: second half rides, T2=120 not yet
+        (114, 122, 113, 121),   # day 3: T2 hit, blended (110+120)/2 = 115
+    ]
+    df = make_df(bars)
+    out = track_outcome(TrackInput(
+        entry_price=100, qty=10, stop=95, t1=110, t2=120, df_post_fill=df,
+    ))
+    assert out.outcome_kind == "WIN_T2"
+    assert out.exit_price == 115   # blended
+
+
+def test_two_stage_t1_then_breakeven_stop():
+    """T1 hit day 1, second half reverses, hits breakeven stop (= entry).
+    Blended exit = (T1 + entry) / 2."""
+    bars = [
+        (101, 112, 99, 111),    # day 1: T1=110 hit
+        (110, 111, 105, 106),   # day 2: drops
+        (105, 106, 99, 100),    # day 3: low=99 < entry=100 → BE stop hit
+    ]
+    df = make_df(bars)
+    out = track_outcome(TrackInput(
+        entry_price=100, qty=10, stop=95, t1=110, t2=120, df_post_fill=df,
+    ))
+    assert out.outcome_kind == "WIN_T1"
+    assert out.exit_price == 105   # blended (110 + 100) / 2 = 105
+
+
+def test_two_stage_t1_then_time_exit_blended():
+    """T1 hit, second half rides to time_exit at higher close."""
+    bars = [(101, 112, 99, 111)] + [(112, 114, 110, 113)] * 9
+    df = make_df(bars)
+    out = track_outcome(TrackInput(
+        entry_price=100, qty=10, stop=95, t1=110, t2=140,
+        df_post_fill=df, max_hold_days=10,
+    ))
+    # T1 hit day 1, second half rides 10 days, last close=113.
+    # Blended (110+113)/2 = 111.5
+    assert out.outcome_kind == "WIN_T1"
+    assert out.exit_price == 111.5
+
+
+def test_two_stage_breakeven_stop_does_not_trigger_below_original_stop():
+    """After T1 hit, the stop is at ENTRY (breakeven). A bar that touches
+    the ORIGINAL stop (e.g. 95) but not breakeven (entry=100) should not
+    exit — wait, breakeven IS higher than original stop, so the stop is
+    actually TIGHTER. Verify breakeven is the binding constraint."""
+    bars = [
+        (101, 112, 99, 111),    # day 1: T1=110 hit
+        (110, 112, 98, 105),    # day 2: low=98 < entry=100 → BE stop hit
+    ]
+    df = make_df(bars)
+    out = track_outcome(TrackInput(
+        entry_price=100, qty=10, stop=92, t1=110, df_post_fill=df,
+    ))
+    # Breakeven stop (=100) is HIGHER than original stop (=92).
+    # Low=98 triggers breakeven first.
+    assert out.outcome_kind == "WIN_T1"
+    # Blended (110 + 100) / 2 = 105
+    assert out.exit_price == 105
+
+
+def test_first_half_stop_still_triggers_loss_stop():
+    """If price hits the ORIGINAL stop before T1 is captured, this is
+    still a LOSS_STOP (no T1 magic happens)."""
+    bars = [(99, 100, 93, 97)]
+    df = make_df(bars)
+    out = track_outcome(TrackInput(
+        entry_price=100, qty=10, stop=95, t1=110, df_post_fill=df,
+    ))
+    assert out.outcome_kind == "LOSS_STOP"
+    assert out.exit_price == 95
 
 
 # ── Corporate-action filter ──────────────────────────────────────────────────
@@ -252,7 +340,9 @@ def db_with_open_fill(tmp_path, monkeypatch):
 def test_close_open_outcomes_marks_winner(db_with_open_fill):
     con = db_with_open_fill
 
-    # Mock ohlcv_loader returns df where high hits t1 on first bar
+    # Phase 1.5: two-stage exit. T1=110 hit, second half closes at
+    # last_close=112 → blended exit = (110+112)/2 = 111.
+    # Gross gain = (111-100)*10 = ₹110 = 11000 paise.
     def mock_loader(symbol, days):
         return make_df([(101, 115, 99, 112)], start="2026-05-16")
 
@@ -265,14 +355,11 @@ def test_close_open_outcomes_marks_winner(db_with_open_fill):
                       "gross_pnl_paise, costs_total_paise, net_pnl_pct "
                       "FROM outcomes").fetchone()
     assert row["outcome_kind"] == "WIN_T1"
-    assert row["exit_price"] == 110
-    # Gross: (110-100) * 10 shares = ₹100 = 10000 paise
-    assert row["gross_pnl_paise"] == 10000
-    # Costs are positive (subtracted from gross)
+    assert row["exit_price"] == 111   # blended
+    assert row["gross_pnl_paise"] == 11000   # (111-100)*10 in paise
     assert row["costs_total_paise"] > 0
-    # Net % < gross % — costs ate some of the win
-    assert row["net_pnl_pct"] < 10.0
-    assert row["net_pnl_pct"] > 0   # still a winner
+    assert row["net_pnl_pct"] < 11.0   # costs reduce gross
+    assert row["net_pnl_pct"] > 0       # still positive
 
 
 def test_close_open_outcomes_apply_costs_false_keeps_gross(db_with_open_fill):
@@ -284,7 +371,7 @@ def test_close_open_outcomes_apply_costs_false_keeps_gross(db_with_open_fill):
     res = close_open_outcomes(con, mock_loader, apply_costs=False)
     assert res["closed"] == 1
     row = con.execute("SELECT net_pnl_pct, costs_total_paise FROM outcomes").fetchone()
-    assert row["net_pnl_pct"] == 10.0
+    assert row["net_pnl_pct"] == 11.0   # blended (111-100)/100*100 = 11%
     assert row["costs_total_paise"] == 0
 
 

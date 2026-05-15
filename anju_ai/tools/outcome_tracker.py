@@ -93,6 +93,9 @@ def track_outcome(inp: TrackInput) -> TrackResult:
     mfe_price = entry   # tracks the highest high seen so far
     mae_price = entry   # tracks the lowest low seen so far
     prev_close = entry  # previous bar's close (or entry for first bar)
+    # PHASE 1.5 — two-stage exit state:
+    t1_hit_already = False  # True after first half is captured at T1
+    t1_exit_price  = None   # the price at which the first half was taken
 
     # Hard floor on what counts as a real intraday move. A >25% adverse
     # gap between consecutive closes/opens is almost always a corporate
@@ -137,36 +140,94 @@ def track_outcome(inp: TrackInput) -> TrackResult:
         if l < mae_price:
             mae_price = l
 
-        # Gap-down below stop: exit at open (worse than expected)
-        if o <= stop:
-            return _close(inp, "LOSS_STOP", df.index[i], o, i + 1,
-                          mfe_price, mae_price)
+        if t1_hit_already:
+            # ── SECOND HALF: tracking remainder with BREAKEVEN stop ──
+            # First half already booked at t1_exit_price.
+            # Stop has moved to ENTRY (locks in 0% on the remainder).
+            be_stop = entry
 
-        # Gap-up above target: exit at open (better than expected)
-        if t1 and o >= t1:
-            kind = "WIN_T2" if (t2 and o >= t2) else "WIN_T1"
-            return _close(inp, kind, df.index[i], o, i + 1, mfe_price, mae_price)
+            # Gap-down below breakeven stop → exit at open
+            if o <= be_stop:
+                blended = (t1_exit_price + o) / 2
+                return _close(inp, "WIN_T1", df.index[i], blended, i + 1,
+                              mfe_price, mae_price)
 
-        # Intraday touch — conservative tiebreak: if both stop AND t1 hit
-        # in the same bar, LOSS_STOP wins (we don't know which came first).
-        stop_hit = l <= stop
-        t1_hit   = t1 is not None and h >= t1
-        t2_hit   = t2 is not None and h >= t2
+            # Gap-up above T2 → exit at open
+            if t2 and o >= t2:
+                blended = (t1_exit_price + o) / 2
+                return _close(inp, "WIN_T2", df.index[i], blended, i + 1,
+                              mfe_price, mae_price)
 
-        if stop_hit:
-            return _close(inp, "LOSS_STOP", df.index[i], stop, i + 1,
-                          mfe_price, mae_price)
-        if t2_hit:
-            return _close(inp, "WIN_T2", df.index[i], t2, i + 1,
-                          mfe_price, mae_price)
-        if t1_hit:
-            return _close(inp, "WIN_T1", df.index[i], t1, i + 1,
-                          mfe_price, mae_price)
+            # Intraday: breakeven-stop wins conservative tiebreak
+            be_hit = l <= be_stop
+            t2_hit = t2 is not None and h >= t2
+
+            if be_hit:
+                blended = (t1_exit_price + be_stop) / 2
+                return _close(inp, "WIN_T1", df.index[i], blended, i + 1,
+                              mfe_price, mae_price)
+            if t2_hit:
+                blended = (t1_exit_price + t2) / 2
+                return _close(inp, "WIN_T2", df.index[i], blended, i + 1,
+                              mfe_price, mae_price)
+        else:
+            # ── FIRST HALF: looking for original stop, T1, or T2 ──
+
+            # Gap-down below stop: full position exit at open (no T1 captured)
+            if o <= stop:
+                return _close(inp, "LOSS_STOP", df.index[i], o, i + 1,
+                              mfe_price, mae_price)
+
+            # Gap-up above T2: full position exit at open (skipped past T1)
+            if t2 and o >= t2:
+                return _close(inp, "WIN_T2", df.index[i], o, i + 1,
+                              mfe_price, mae_price)
+
+            # Gap-up above T1: first half captured at OPEN (better than T1)
+            if t1 and o >= t1:
+                t1_hit_already = True
+                t1_exit_price = o
+                # Did the bar also reach T2 intraday?
+                if t2 and h >= t2:
+                    blended = (t1_exit_price + t2) / 2
+                    return _close(inp, "WIN_T2", df.index[i], blended, i + 1,
+                                  mfe_price, mae_price)
+                prev_close = c
+                continue
+
+            # Intraday — conservative tiebreak: stop wins over T1 same bar
+            stop_hit = l <= stop
+            t1_hit   = t1 is not None and h >= t1
+            t2_hit   = t2 is not None and h >= t2
+
+            if stop_hit:
+                return _close(inp, "LOSS_STOP", df.index[i], stop, i + 1,
+                              mfe_price, mae_price)
+            if t2_hit:
+                # T2 hit before T1 captured → full position at T2 (or blended
+                # if T1 also hit this bar — which is virtually always true)
+                blended = ((t1 + t2) / 2) if t1_hit else t2
+                return _close(inp, "WIN_T2", df.index[i], blended, i + 1,
+                              mfe_price, mae_price)
+            if t1_hit:
+                t1_hit_already = True
+                t1_exit_price = t1
+                prev_close = c
+                continue
 
         # Bar fully processed — update prev_close for next iteration
         prev_close = c
 
-    # No stop/target hit within max_hold_days
+    # ── End of data ─────────────────────────────────────────────────
+    # If T1 was already captured but the second half is still open,
+    # close at the blended (t1_exit_price + last_close) / 2.
+    if t1_hit_already and t1_exit_price is not None and n_bars > 0:
+        last_close = float(df.iloc[n_bars - 1]["Close"])
+        blended = (t1_exit_price + last_close) / 2
+        return _close(inp, "WIN_T1", df.index[n_bars - 1], blended, n_bars,
+                      mfe_price, mae_price)
+
+    # No T1 hit, max hold reached
     if n_bars > 0 and n_bars >= inp.max_hold_days:
         last = df.iloc[n_bars - 1]
         return _close(inp, "TIME_EXIT", df.index[n_bars - 1],
