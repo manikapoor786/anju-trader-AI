@@ -66,6 +66,17 @@ class BacktestInput(BaseModel):
     # Phase 1.8 moved the T1-distance logic upstream into scoring.py's
     # verdict gate, where it is entry-model-aware).
     respect_t1_distance: bool = True
+    # Phase 2.0: per-stock sizing based on market-cap segment (large/mid/
+    # small/micro). When True (default), each trade uses risk_pct +
+    # max_position_pct from anju_core.universe.SEGMENT_SIZING instead of
+    # the BacktestInput defaults. Smaller caps get smaller positions.
+    # Set False to use the flat base_risk_pct / max_position_pct for all
+    # trades (regression tests, large-cap-only runs).
+    segment_aware_sizing: bool = True
+    # Phase 2.0: enable the sectoral-strength soft bonus (computed per day
+    # from sector ETF 1W returns + peer breadth). Disable for tests that
+    # only want to verify rule-based scoring without sector noise.
+    use_sector_context: bool = True
     base_segment: str = "midcap"          # used for cost calc
     max_workers: int = 8                  # parallelism for symbol scoring
 
@@ -163,9 +174,14 @@ def _trading_days(ohlcv_loader: Callable, symbol: str,
 
 def _score_one_at_date(symbol: str, df_full: pd.DataFrame,
                        as_of_date: pd.Timestamp, mode: str,
-                       nifty_close: pd.Series | None) -> tuple[str, ScoreResult | None]:
+                       nifty_close: pd.Series | None,
+                       sector_ctx: object | None = None,
+                       ) -> tuple[str, ScoreResult | None]:
     """Score one symbol using data strictly up to (and including) as_of_date.
-    Returns (symbol, ScoreResult or None)."""
+    Returns (symbol, ScoreResult or None).
+
+    Phase 2.0: now accepts optional sector_ctx (SectorContext) for the
+    sectoral-strength soft bonus in scoring."""
     try:
         df_full.index = pd.to_datetime(df_full.index)
         df = df_full[df_full.index <= as_of_date]
@@ -180,6 +196,7 @@ def _score_one_at_date(symbol: str, df_full: pd.DataFrame,
                 pass
         return symbol, score_signal(ScoreInput(
             symbol=symbol, df=df, mode=mode, nifty_close=nf,
+            sector_ctx=sector_ctx,
         ))
     except Exception:
         return symbol, None
@@ -339,13 +356,81 @@ def run_backtest(inp: BacktestInput,
                             f"· trades={len(trades)} · open={len(open_positions)}")
             continue
 
+        # Phase 2.0: compute sectoral strength context once per day.
+        # Sector ETF 1W returns + peer breadth — both as-of `as_of` so we
+        # never look ahead. Cached for the whole day.
+        sector_perf_today: dict[str, float] = {}
+        breadth_cache_today: dict[str, float] = {}
+        if inp.use_sector_context:
+            try:
+                from anju_core.sectors import SECTOR_ETFS, SECTOR_STOCKS
+                # Sector ETF 1-week return from cached histories where
+                # available; skip sectors whose ETF isn't in the universe.
+                for sector, etf_sym in SECTOR_ETFS.items():
+                    # Try with and without .NS / leading ^ (indices aren't loaded
+                    # as part of universe_symbols, so this typically skips).
+                    df_etf = histories.get(etf_sym) or histories.get(etf_sym + ".NS")
+                    if df_etf is None:
+                        continue
+                    df_etf_pre = df_etf[df_etf.index <= as_of]
+                    if len(df_etf_pre) < 7:
+                        continue
+                    c = df_etf_pre["Close"].astype(float)
+                    sector_perf_today[sector] = float(
+                        (c.iloc[-1] - c.iloc[-6]) / c.iloc[-6] * 100
+                    )
+                # Peer breadth from in-memory histories for known sectors.
+                for sector, peers in SECTOR_STOCKS.items():
+                    above, counted = 0, 0
+                    for p_bare in peers:
+                        df_p = histories.get(p_bare + ".NS")
+                        if df_p is None:
+                            continue
+                        df_p_pre = df_p[df_p.index <= as_of]
+                        if len(df_p_pre) < 50:
+                            continue
+                        c_p = df_p_pre["Close"].astype(float)
+                        ma50_p = float(c_p.rolling(50).mean().iloc[-1])
+                        if pd.isna(ma50_p):
+                            continue
+                        counted += 1
+                        if float(c_p.iloc[-1]) > ma50_p:
+                            above += 1
+                    if counted >= 3:
+                        breadth_cache_today[sector] = round(above / counted * 100, 1)
+            except Exception:
+                pass
+
+        # Rank sectors top3/bottom3 for this day
+        if sector_perf_today:
+            ordered = sorted(sector_perf_today.items(), key=lambda x: x[1], reverse=True)
+            top3_sectors = {s for s, _ in ordered[:3]}
+            bottom3_sectors = {s for s, _ in ordered[-3:]} if len(ordered) >= 3 else set()
+        else:
+            top3_sectors, bottom3_sectors = set(), set()
+
+        def _ctx_for(sym: str):
+            from anju_core.sectors import sector_for_symbol
+            from anju_ai.tools.sector_strength import SectorContext
+            sec = sector_for_symbol(sym)
+            if sec is None:
+                return None
+            return SectorContext(
+                symbol=sym, sector=sec,
+                is_top3_1w=(sec in top3_sectors),
+                is_bottom3_1w=(sec in bottom3_sectors),
+                peer_breadth_pct=breadth_cache_today.get(sec, 0.0),
+                sector_1w_pct=sector_perf_today.get(sec, 0.0),
+            )
+
         # Score every symbol as of this date in parallel
         score_results: list[ScoreResult] = []
         day_none = 0
         day_below = 0
         with ThreadPoolExecutor(max_workers=inp.max_workers) as ex:
             futures = [
-                ex.submit(_score_one_at_date, sym, df, as_of, inp.mode, nifty_close)
+                ex.submit(_score_one_at_date, sym, df, as_of, inp.mode,
+                          nifty_close, _ctx_for(sym))
                 for sym, df in histories.items()
             ]
             for fut in as_completed(futures):
@@ -410,10 +495,22 @@ def run_backtest(inp: BacktestInput,
                 continue
             fill_price = round(base_open * (1 + inp.slippage_pct_buy / 100), 2)
 
+            # Phase 2.0: per-stock sizing by market-cap segment.
+            # Smaller caps → smaller positions to contain catastrophic
+            # tail losses. This is the single biggest defense against
+            # the Phase 1.8 nifty500 catastrophe (-81% drawdown).
+            if inp.segment_aware_sizing:
+                from anju_core.universe import sizing_for_symbol
+                sizing = sizing_for_symbol(r.symbol)
+                risk_pct = sizing["risk_pct"]
+                max_pos_pct = sizing["max_position_pct"]
+            else:
+                risk_pct = inp.base_risk_pct
+                max_pos_pct = inp.max_position_pct
+
             qty = _compute_qty(fill_price,
                                r.exit_logic.stop if r.exit_logic else None,
-                               inp.capital_inr, inp.base_risk_pct,
-                               inp.max_position_pct)
+                               inp.capital_inr, risk_pct, max_pos_pct)
             if qty <= 0:
                 diag.setdefault("fill_drop_reasons", {})["qty_zero"] = \
                     diag.get("fill_drop_reasons", {}).get("qty_zero", 0) + 1

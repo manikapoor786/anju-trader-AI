@@ -47,6 +47,14 @@ class ScoreInput(BaseModel):
         default=None,
         description="Nifty Close series aligned to df.index — for RS computation",
     )
+    # Phase 2.0: optional sectoral-strength context. When provided, scoring
+    # adds bonuses for top-3-sector stocks with strong peer breadth, and
+    # penalties for bottom-3-sector stocks. None → no sector adjustment
+    # (neutral; same behaviour as Phase 1.x).
+    sector_ctx: object | None = Field(
+        default=None,
+        description="anju_ai.tools.sector_strength.SectorContext (optional)",
+    )
 
 
 class ExitLogic(BaseModel):
@@ -486,6 +494,29 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
                 )
     except Exception:
         pass
+
+    # ── Phase 2.0: sectoral strength soft bonus ──────────────────
+    # User-identified mental filter: "other shares of sectors are also
+    # positive". Top-3-sector stocks with high peer breadth get a
+    # score bonus; bottom-3-sector stocks get a small penalty.
+    # Soft (not a gate) — high-conviction setups can still BUY without
+    # sector confirmation, but the verdict's score threshold makes them
+    # rarer in lagging sectors.
+    if inp.sector_ctx is not None:
+        try:
+            sctx = inp.sector_ctx
+            if getattr(sctx, "is_top3_1w", False):
+                if getattr(sctx, "peer_breadth_pct", 0) >= 60:
+                    score += _add(breakdown, "sector_wave", 5, tags,
+                                  f"🌊 Sector wave ({sctx.sector})")
+                else:
+                    score += _add(breakdown, "sector_top3", 3, tags,
+                                  f"📈 Sector top-3 ({sctx.sector})")
+            elif getattr(sctx, "is_bottom3_1w", False):
+                score += _add(breakdown, "sector_lagging", -3, tags,
+                              f"📉 Sector lagging ({sctx.sector})")
+        except Exception:
+            pass
 
     # ── Verdict ──────────────────────────────────────────────────
     # Phase 1.8: entry-model-aware T1-distance gate. The Phase 1.6

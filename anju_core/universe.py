@@ -201,6 +201,78 @@ UNIVERSES: dict[str, list[str]] = {
 }
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Phase 2.0: market-cap segmentation for risk-aware position sizing.
+#
+# The Phase 1.8 nifty500 backtest produced -81% drawdown because the same
+# 10% position size was applied to smallcaps (where -20% gap-downs are
+# common) and large caps alike. Segment-aware sizing caps catastrophic
+# trade losses at ~0.4-0.5% of portfolio even when individual stocks
+# crater 20%.
+# ─────────────────────────────────────────────────────────────────────
+
+# Build symbol → rank index from the cached NSE 750 (ranked by market cap).
+_RANK_INDEX: dict[str, int] = {}
+for _i, _sym in enumerate(_NSE_FULL):
+    _RANK_INDEX[_sym] = _i + 1   # 1-indexed rank
+
+
+def market_cap_rank(symbol: str) -> int | None:
+    """Return 1-750 market-cap rank for a symbol (lower = bigger), or None
+    if the symbol isn't in the NSE 500 + Microcap 250 cache."""
+    bare_ns = symbol.upper().replace(".BSE", "")
+    if not bare_ns.endswith(".NS"):
+        bare_ns += ".NS"
+    return _RANK_INDEX.get(bare_ns)
+
+
+def cap_segment(symbol: str) -> str:
+    """Return cap segment for sizing rules: 'large' | 'mid' | 'small' |
+    'micro' | 'unknown'. Used by backtest + live sizing.
+
+    Cutoffs follow NSE convention:
+      large:  rank 1-100   (Nifty 100)
+      mid:    rank 101-250 (Nifty Midcap 150)
+      small:  rank 251-500 (Nifty Smallcap 250)
+      micro:  rank 501-750 (Nifty Microcap 250)
+      unknown: symbol not in cache — use the most conservative sizing.
+    """
+    rank = market_cap_rank(symbol)
+    if rank is None:
+        return "unknown"
+    if rank <= 100:
+        return "large"
+    if rank <= 250:
+        return "mid"
+    if rank <= 500:
+        return "small"
+    return "micro"
+
+
+# Sizing rules per segment.
+# risk_pct: percentage of capital risked per trade (max loss = qty × stop_distance)
+# max_position_pct: cap on position size as % of capital
+#
+# Smaller risk + cap for smaller caps prevents one bad smallcap from
+# blowing up the portfolio. Catastrophic loss math:
+#   large  -20% × 10% pos = -2.0% portfolio
+#   mid    -20% ×  6% pos = -1.2% portfolio
+#   small  -20% ×  3% pos = -0.6% portfolio
+#   micro  -20% ×  2% pos = -0.4% portfolio
+SEGMENT_SIZING: dict[str, dict[str, float]] = {
+    "large":   {"risk_pct": 1.0,  "max_position_pct": 10.0},
+    "mid":     {"risk_pct": 0.8,  "max_position_pct": 6.0},
+    "small":   {"risk_pct": 0.6,  "max_position_pct": 3.0},
+    "micro":   {"risk_pct": 0.4,  "max_position_pct": 2.0},
+    "unknown": {"risk_pct": 0.4,  "max_position_pct": 2.0},  # conservative
+}
+
+
+def sizing_for_symbol(symbol: str) -> dict[str, float]:
+    """Return {risk_pct, max_position_pct} for sizing a trade in `symbol`."""
+    return dict(SEGMENT_SIZING[cap_segment(symbol)])
+
+
 def get_universe(name: str) -> list[str]:
     """Return the symbol list for a named universe. Raises if unknown."""
     name = name.lower().strip()

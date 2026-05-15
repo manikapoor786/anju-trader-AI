@@ -63,6 +63,69 @@ def test_nifty500_overlaps_but_isnt_subset_of_legacy_180():
     )
 
 
+# ── Phase 2.0: market-cap segmentation ────────────────────────────────────
+
+def test_market_cap_rank_returns_int_for_known_symbols():
+    from anju_core.universe import market_cap_rank
+    # SBIN is high in the cache, RELIANCE somewhere in top 20
+    r = market_cap_rank("SBIN")
+    assert r is not None and 1 <= r <= 750
+    r2 = market_cap_rank("RELIANCE.NS")
+    assert r2 is not None and 1 <= r2 <= 750
+
+
+def test_market_cap_rank_returns_none_for_unknown():
+    from anju_core.universe import market_cap_rank
+    assert market_cap_rank("DEFINITELY_NOT_REAL") is None
+
+
+def test_cap_segment_classifies_correctly():
+    from anju_core.universe import cap_segment, market_cap_rank
+    # We can't hardcode-test individual symbols (the cache reorders), but
+    # rank=1 must be large, rank=600 must be micro etc.
+    for sym in ["SBIN", "BSE", "HDFCBANK", "RELIANCE"]:
+        rank = market_cap_rank(sym)
+        seg = cap_segment(sym)
+        if rank is None:
+            assert seg == "unknown"
+        elif rank <= 100:
+            assert seg == "large"
+        elif rank <= 250:
+            assert seg == "mid"
+        elif rank <= 500:
+            assert seg == "small"
+        else:
+            assert seg == "micro"
+
+
+def test_sizing_for_symbol_returns_expected_keys():
+    from anju_core.universe import sizing_for_symbol
+    s = sizing_for_symbol("SBIN")
+    assert "risk_pct" in s and "max_position_pct" in s
+    assert 0 < s["risk_pct"] <= 1.0
+    assert 0 < s["max_position_pct"] <= 10.0
+
+
+def test_sizing_is_smaller_for_smaller_caps():
+    from anju_core.universe import SEGMENT_SIZING
+    # Sanity: smaller segments should never have LARGER position caps.
+    assert SEGMENT_SIZING["large"]["max_position_pct"] >= \
+           SEGMENT_SIZING["mid"]["max_position_pct"]
+    assert SEGMENT_SIZING["mid"]["max_position_pct"] >= \
+           SEGMENT_SIZING["small"]["max_position_pct"]
+    assert SEGMENT_SIZING["small"]["max_position_pct"] >= \
+           SEGMENT_SIZING["micro"]["max_position_pct"]
+
+
+def test_sector_for_symbol_recognises_known_stocks():
+    from anju_core.sectors import sector_for_symbol
+    assert sector_for_symbol("TATASTEEL") == "Metal"
+    assert sector_for_symbol("TATASTEEL.NS") == "Metal"
+    assert sector_for_symbol("HAL.NS") == "Defence"
+    assert sector_for_symbol("DLF") == "Realty"
+    assert sector_for_symbol("FAKENAME") is None
+
+
 def test_all_universes_use_ns_suffix():
     for name, syms in UNIVERSES.items():
         for s in syms:
