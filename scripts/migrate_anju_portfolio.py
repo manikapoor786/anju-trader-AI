@@ -37,6 +37,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Bootstrap project root so anju_ai imports work when run as a script
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 
 def load_anju_portfolio(path: Path) -> list[dict]:
     if not path.exists():
