@@ -427,15 +427,13 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
             trailing_stop = round(max(stop_candidates), 2) if stop_candidates else round(cur_price * 0.95, 2)
 
             # Targets: swing highs above price.
-            # Phase 1.7: T1 candidates must clear cur_price by >= +1.5%, not
-            # +0.5%. Empirical evidence — Phase 1.6 backtest (117 trades):
-            # the +0.5% buffer was too thin to survive normal gap-up risk
-            # between signal close and next-day fill. 4 of 5 worst losers
-            # had T1 within 0.2% of fill price (T1 in {474, 2800, 2334, 2958}
-            # vs fills {473.71, 2804.20, 2330.49, 2952.42}), giving the
-            # two-stage exit zero upside on its first partial. The +1.5%
-            # buffer leaves >= +0.5% T1 distance even after a 1% gap-up.
-            T1_MIN_DISTANCE = 1.015   # +1.5% above signal close
+            # Phase 1.8: T1 candidate filter restored to +0.5%. The Phase 1.7
+            # attempt to widen this to +1.5% backfired — it pushed T1 into
+            # the 1-3%-at-fill "dead zone" for Retest (where win rate is 46%
+            # and net is -2%), instead of the 3-5% sweet zone (60% win, +0.56%
+            # net). The right filter is entry-model-aware and applied at the
+            # verdict stage below, not by widening this raw buffer.
+            T1_MIN_DISTANCE = 1.005   # +0.5% above signal close
             h_arr = high.values
             lookback = min(len(h_arr), 252)
             peaks_idx = argrelextrema(h_arr[-lookback:], np.greater_equal, order=7)[0]
@@ -490,26 +488,29 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
         pass
 
     # ── Verdict ──────────────────────────────────────────────────
-    # Phase 1.6: dual-gate verdict (entry-model OR high score).
-    # Empirical evidence from the Phase 1.5 v2 backtest (1083 trades):
-    #   ENTRY MODEL bucket  trades   win%   net
-    #   🚀 Breakout Entry   9        100%   +1.538%   PROFITABLE
-    #   🔄 Retest Entry     70       77%    +0.082%   PROFITABLE
-    #   🎯 Early Base       24       67%    -0.423%   losing
-    #   📈 Momentum         448      67%    -0.574%   losing
-    #   — (empty)           532      64%    -0.793%   losing
+    # Phase 1.8: entry-model-aware T1-distance gate. The Phase 1.6
+    # score>=30 "high conviction" override is removed — Phase 1.7
+    # backtest data showed it was a trap: 25 trades, 48% win, -1.43%
+    # net (21 of 25 were Retest with redundant signals stacking score).
     #
-    #   SCORE bucket        trades   win%   net
-    #   30-34               18       89%    +0.378%   PROFITABLE
-    #   25-29               101      70%    -0.725%   losing
-    #   all other buckets:  losing
+    # Empirical evidence from Phase 1.7 (112 trades, per-trade JSON
+    # in data/backtests/bt_20260515_164819*.trades.json):
     #
-    # Score 30+ is HIGH CONVICTION — typically means 2nd base + multiple
-    # volume signals + RS + stage 2 all firing together. These work even
-    # if entry_model doesn't match a clean pattern. User intuition
-    # confirmed empirically: 2nd base + high volume IS profitable.
+    #   Retest by T1 distance at fill:
+    #     1-2%  →  54% win, NET -1.28%   ← dead zone
+    #     2-3%  →  46% win, NET -2.00%   ← dead zone
+    #     3-5%  →  60% win, NET +0.56%   ← SWEET SPOT
+    #     5-10% →  44% win, NET -0.46%
+    #    >10%   →  25% win, NET -0.46%
+    #
+    #   Breakout works with close T1 (squeeze plays):
+    #     1-3%  →  88% win, all positive
+    #     3-6%  →  100% win
+    #     >6%   →  DIVISLAB -9.20% (single sample; cap as safety)
+    #
+    # Filter on simulated re-fill: 50 trades, 62% win, R:R 0.78x,
+    # NET +0.480%/trade — positive expectancy survives costs.
     PROFITABLE_ENTRIES = {"🚀 Breakout Entry", "🔄 Retest Entry"}
-    HIGH_CONVICTION_SCORE = 30   # score floor where any clean signal can BUY
 
     if score >= 15:
         verdict = "BUY"
@@ -518,16 +519,28 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
     else:
         verdict = "AVOID"
 
-    # Phase 1.6 gate: BUY requires EITHER profitable entry_model OR
-    # score >= 30. Otherwise cap at WATCH (or AVOID if no entry pattern).
+    # Gate 1: must have an entry pattern AND that pattern must be one of
+    # the two empirically profitable ones (Breakout/Retest).
     if not entry_model:
         verdict = "AVOID"
-    elif verdict == "BUY":
-        if (entry_model not in PROFITABLE_ENTRIES
-                and score < HIGH_CONVICTION_SCORE):
-            # Has entry pattern but neither Breakout/Retest nor
-            # high-conviction — track but don't deploy.
-            verdict = "WATCH"
+    elif verdict == "BUY" and entry_model not in PROFITABLE_ENTRIES:
+        verdict = "WATCH"
+
+    # Gate 2: entry-model-aware T1 distance check. cur_close is the
+    # signal-day close; live fill happens next-day at open with slippage.
+    # We allow a small gap-up buffer in the thresholds below.
+    if verdict == "BUY" and exit_logic is not None and exit_logic.partial_target:
+        cur_close = float(close.iloc[-1])
+        t1_dist_pct = (exit_logic.partial_target - cur_close) / cur_close
+        if entry_model == "🔄 Retest Entry":
+            # Retest sweet zone: 3-10% from signal close → ~2.5-9.5% at fill.
+            if t1_dist_pct < 0.03 or t1_dist_pct > 0.10:
+                verdict = "WATCH"
+        elif entry_model == "🚀 Breakout Entry":
+            # Breakout: capped on the upside only (close T1 works fine for
+            # squeezes; only filter the loose "no nearby resistance" case).
+            if t1_dist_pct > 0.06:
+                verdict = "WATCH"
 
     cur_price  = round(float(close.iloc[-1]), 2)
     prev_close = float(close.iloc[-2]) if len(df) > 1 else cur_price

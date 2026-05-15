@@ -233,18 +233,25 @@ def test_close_loop_handles_ns_suffix_correctly():
     assert total > 0, "Bug regressed — every position is being dropped"
 
 
-def test_t1_distance_gate_rejects_fills_with_t1_too_close():
-    """Phase 1.7: when gap-up at fill brings T1 within 0.5% of fill
-    price, the fill must be rejected (signals had T1 set against the
-    previous day's close; a meaningful gap-up eats the buffer entirely).
+def test_t1_distance_gate_keeps_retest_fills_in_sweet_zone():
+    """Phase 1.8: T1-distance gate is now in scoring's verdict logic
+    (was a fill-time check in Phase 1.7, which proved too blunt).
 
-    This was the dominant loss mechanism in the Phase 1.6 backtest —
-    4 of 5 worst Retest losers had T1 within 0.2% of fill, giving the
-    two-stage exit zero upside on the first partial."""
+    The gate is entry-model-aware:
+      - Retest Entry: BUY only if T1 is in [+3%, +10%] of signal close
+      - Breakout Entry: BUY only if T1 is <= +6% of signal close
+
+    Empirical evidence (Phase 1.7 backtest, per-trade JSON): the 1-3%
+    T1-distance range was a dead zone for Retest (54% win, -1.28% net),
+    while the 3-5% range was the sweet spot (60% win, +0.56% net).
+    Pushing T1 farther than +10% means resistance is too far to be
+    a useful target.
+
+    Verification: with the gate ON (default), every Retest BUY that
+    fills has T1 in the sweet zone relative to signal close."""
     import pandas as pd
     from anju_ai.tools.backtest import BacktestInput, run_backtest
 
-    # Build a generic breakout history (enough for scoring to fire).
     n = 200
     closes, vols = [], []
     for i in range(n):
@@ -271,9 +278,6 @@ def test_t1_distance_gate_rejects_fills_with_t1_too_close():
     def loader(symbol, days):
         return df.copy()
 
-    # With the gate ON (default), no fill should produce T1 < 0.5% from
-    # fill_price. Approximate verification: any trade that does close
-    # must have t1/fill_price >= 1.005.
     inp = BacktestInput(
         name="t1_gate_on",
         start_date="2024-04-01", end_date="2024-09-30",
@@ -281,16 +285,29 @@ def test_t1_distance_gate_rejects_fills_with_t1_too_close():
         mode="aggressive", min_score=4.0,
         max_open_positions=10, capital_inr=1_000_000,
         max_hold_days=20, apply_costs=False,
-        respect_verdict_gate=False,
-        respect_t1_distance=True,
+        # Verdict gate ON — Phase 1.8 T1 gate runs inside scoring.
+        respect_verdict_gate=True,
     )
     report, trades = run_backtest(inp, ohlcv_loader=loader)
     for t in trades:
-        if t.t1 is not None and t.fill_price > 0:
-            assert (t.t1 - t.fill_price) / t.fill_price >= 0.005, (
-                f"{t.symbol}: T1 {t.t1} only "
-                f"{(t.t1 - t.fill_price) / t.fill_price * 100:.2f}% above "
-                f"fill {t.fill_price} — gate failed to reject"
+        if t.t1 is None or t.fill_price <= 0:
+            continue
+        # The gate compares to signal-day close, but we only have fill_price
+        # in the TradeRecord. Estimate signal-day close as fill_price /
+        # (1 + slippage), and check T1 distance from there. We use a
+        # slightly relaxed lower bound (0.025) to absorb intraday slippage
+        # variation between signal close and fill open.
+        approx_signal_close = t.fill_price / 1.0015  # 0.15% slippage default
+        t1_dist = (t.t1 - approx_signal_close) / approx_signal_close
+        if t.entry_model == "🔄 Retest Entry":
+            assert 0.025 <= t1_dist <= 0.105, (
+                f"{t.symbol}: Retest with T1 dist {t1_dist*100:.2f}% — "
+                f"outside Phase 1.8 sweet zone [+3%, +10%]"
+            )
+        elif t.entry_model == "🚀 Breakout Entry":
+            assert t1_dist <= 0.065, (
+                f"{t.symbol}: Breakout with T1 dist {t1_dist*100:.2f}% — "
+                f"above Phase 1.8 cap of +6%"
             )
 
 
