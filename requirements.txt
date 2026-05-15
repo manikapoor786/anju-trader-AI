@@ -13,6 +13,7 @@ yfinance>=0.2.40,<1.0
 beautifulsoup4>=4.12,<5.0
 feedparser>=6.0,<7.0
 lxml>=5.0,<6.0
+nsepython>=2.94,<3.0    # live NSE index constituent fetching (nifty500/750)
 
 # Charting (forked from anju-trader chart_analysis.py)
 matplotlib>=3.9,<4.0

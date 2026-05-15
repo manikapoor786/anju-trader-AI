@@ -6,6 +6,9 @@ from anju_core.universe import (
     NIFTY_50,
     NIFTY_100,
     NIFTY_180,
+    NIFTY_500,
+    NIFTY_750,
+    NIFTY_MICROCAP_250,
     NIFTY_NEXT_50,
     UNIVERSES,
     get_universe,
@@ -30,6 +33,34 @@ def test_nifty100_no_duplicates():
 def test_nifty180_no_duplicates_and_supersets_nifty100():
     assert len(NIFTY_180) == len(set(NIFTY_180))
     assert set(NIFTY_100).issubset(set(NIFTY_180))
+
+
+def test_nifty500_loaded_from_nse_cache():
+    """Phase 1.9: nifty500 must be the real NSE 500 list, not a stub."""
+    assert len(NIFTY_500) == 500, (
+        f"Expected 500 stocks, got {len(NIFTY_500)} — "
+        "data/nse_universe_cache.csv missing or wrong size?"
+    )
+    assert len(set(NIFTY_500)) == 500
+
+
+def test_nifty750_is_500_plus_microcap_250():
+    assert len(NIFTY_750) == 750
+    assert len(set(NIFTY_750)) == 750
+    assert len(NIFTY_MICROCAP_250) == 250
+    # nifty750 = nifty500 + microcap250 (in that order)
+    assert NIFTY_750[:500] == NIFTY_500
+    assert NIFTY_750[500:] == NIFTY_MICROCAP_250
+
+
+def test_nifty500_overlaps_but_isnt_subset_of_legacy_180():
+    """The real NSE 500 is reorganised by market cap and won't be a strict
+    superset of our hardcoded NIFTY_100 (which has stale aliases like
+    HDFCBANK.NS vs HDFC.NS). It should still substantially overlap."""
+    overlap = set(NIFTY_500) & set(NIFTY_100)
+    assert len(overlap) >= 70, (
+        f"nifty500 should contain most of nifty100, got overlap {len(overlap)}"
+    )
 
 
 def test_all_universes_use_ns_suffix():

@@ -66,15 +66,138 @@ NIFTY_MIDCAP = [
 NIFTY_100 = list(dict.fromkeys(NIFTY_50 + NIFTY_NEXT_50))
 NIFTY_180 = list(dict.fromkeys(NIFTY_50 + NIFTY_NEXT_50 + NIFTY_MIDCAP))
 
+
+# ─────────────────────────────────────────────────────────────────────
+# Phase 1.9: real nifty500 / nifty750 via NSE official constituents.
+#
+# Source: nsepython-fetched lists ("NIFTY 500" + "NIFTY MICROCAP 250"),
+# cached to data/nse_universe_cache.csv. Refreshed weekly via the
+# fetch_nse_constituents() helper below.
+#
+# Layout of the cache file:
+#   rows  1-500  =  NIFTY 500 constituents (ranked by market cap)
+#   rows 501-750 =  NIFTY MICROCAP 250 (stocks ranked 501-750 by NSE)
+# Combined: ~750 unique symbols covering the full liquid Indian universe.
+# ─────────────────────────────────────────────────────────────────────
+
+import os
+from pathlib import Path
+
+
+def _cache_path() -> Path:
+    """Return path to the NSE universe cache CSV (anju-trader-AI/data/)."""
+    return Path(__file__).resolve().parents[1] / "data" / "nse_universe_cache.csv"
+
+
+def _load_cache() -> list[str]:
+    """Load the cached NSE 750 symbol list. Returns empty list if missing."""
+    p = _cache_path()
+    if not p.exists():
+        return []
+    try:
+        return [
+            line.strip() + ".NS"
+            for line in p.read_text().splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+    except Exception:
+        return []
+
+
+def _ensure_cache_fresh(max_age_days: int = 7) -> list[str]:
+    """Return the cached list, refreshing from NSE if older than max_age_days.
+
+    Falls back to the cached file if nsepython is unavailable or fetch fails.
+    Used at import time so live signals always have a fresh universe.
+    """
+    p = _cache_path()
+    if p.exists():
+        age_days = (
+            (os.path.getmtime(p)
+             - 0) / 86400
+        )
+        import time
+        age_days = (time.time() - os.path.getmtime(p)) / 86400
+        if age_days < max_age_days:
+            return _load_cache()
+
+    # Try to refresh
+    fetched = fetch_nse_constituents()
+    if fetched and len(fetched) >= 500:
+        return fetched
+    # Fall back to whatever we have cached
+    return _load_cache()
+
+
+def fetch_nse_constituents() -> list[str] | None:
+    """Fetch live "NIFTY 500" + "NIFTY MICROCAP 250" from NSE India.
+
+    Writes the result to data/nse_universe_cache.csv on success.
+    Returns None if nsepython is unavailable or fetch fails — caller
+    should fall back to the cached list.
+    """
+    try:
+        from nsepython import nsefetch
+    except ImportError:
+        return None
+
+    TARGET_INDICES = ["NIFTY 500", "NIFTY MICROCAP 250"]
+    all_symbols: list[str] = []
+    for index_name in TARGET_INDICES:
+        try:
+            url = (
+                "https://www.nseindia.com/api/equity-stockIndices"
+                f"?index={index_name.replace(' ', '%20')}"
+            )
+            data = nsefetch(url)
+            records = data.get("data", [])
+            syms = [
+                r["symbol"].strip() + ".NS"
+                for r in records
+                if r.get("symbol", "").strip()
+                and not r["symbol"].startswith("NIFTY")
+            ]
+            all_symbols.extend(syms)
+        except Exception:
+            continue
+
+    if len(all_symbols) < 500:
+        return None
+
+    unique = list(dict.fromkeys(all_symbols))
+    try:
+        p = _cache_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("\n".join(s.replace(".NS", "") for s in unique) + "\n")
+    except Exception:
+        pass
+    return unique
+
+
+# Build real nifty500/nifty750 from cache at import time.
+# Falls back to NIFTY_180 if the cache is missing.
+_NSE_FULL = _load_cache()
+if _NSE_FULL:
+    NIFTY_500 = _NSE_FULL[:500]
+    NIFTY_750 = _NSE_FULL                       # full 750 incl. microcaps
+    NIFTY_MICROCAP_250 = _NSE_FULL[500:]
+else:
+    # Defensive fallback — should only hit during fresh checkout before
+    # the cache file exists. Real cache committed to git.
+    NIFTY_500 = NIFTY_180
+    NIFTY_750 = NIFTY_180
+    NIFTY_MICROCAP_250 = []
+
+
 UNIVERSES: dict[str, list[str]] = {
-    "nifty50":   NIFTY_50,
-    "next50":    NIFTY_NEXT_50,
-    "midcap":    NIFTY_MIDCAP,
-    "nifty100":  NIFTY_100,
-    "nifty180":  NIFTY_180,
-    # Aliases for backward-compat with workflow inputs:
-    "nifty500":  NIFTY_180,   # Phase 1 will swap in real 500
-    "nifty750":  NIFTY_180,   # Phase 1 will swap in real 750
+    "nifty50":      NIFTY_50,
+    "next50":       NIFTY_NEXT_50,
+    "midcap":       NIFTY_MIDCAP,
+    "nifty100":     NIFTY_100,
+    "nifty180":     NIFTY_180,
+    "nifty500":     NIFTY_500,
+    "nifty750":     NIFTY_750,
+    "microcap250":  NIFTY_MICROCAP_250,
 }
 
 

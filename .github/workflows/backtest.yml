@@ -18,9 +18,9 @@ on:
       universe:
         description: "Universe"
         required: true
-        default: "nifty100"
+        default: "nifty500"
         type: choice
-        options: [nifty50, nifty100, nifty180, midcap]
+        options: [nifty50, nifty100, nifty180, midcap, nifty500, nifty750, microcap250]
       mode:
         description: "Scoring mode"
         required: true
