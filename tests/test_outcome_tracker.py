@@ -184,6 +184,41 @@ def test_gross_pnl_paise_correct():
     assert out.gross_pnl_pct == 10.0
 
 
+# ── Corporate-action filter ──────────────────────────────────────────────────
+
+def test_corporate_action_recorded_as_zero_pnl_not_loss_stop():
+    """REGRESSION: VEDL gapped from ₹773 close to ₹289 open on a split day
+    in 2026. Outcome tracker was recording this as LOSS_STOP at ₹289 —
+    a fake -65% loss. With the 25% adverse-gap filter, the trade closes
+    as CORPORATE_ACTION with 0% P&L (real shareholder is unaffected)."""
+    bars = [
+        (101, 105, 99, 103),   # normal day 1, close 103
+        (29, 32, 28, 30),       # day 2: ~71% gap-down vs prev close 103 (split)
+    ]
+    df = make_df(bars)
+    out = track_outcome(TrackInput(
+        entry_price=100, qty=10, stop=95, t1=120,
+        df_post_fill=df, max_hold_days=10,
+    ))
+    assert out.outcome_kind == "CORPORATE_ACTION"
+    assert out.gross_pnl_pct == 0.0
+    assert out.gross_pnl_paise == 0
+    assert out.is_closed
+
+
+def test_real_gap_down_below_threshold_still_triggers_stop():
+    """Make sure normal gap-down losses still get caught. A 10% gap is
+    a real loss event, not a corporate action."""
+    bars = [(85, 86, 84, 85)]   # opens at 85, well below stop 95
+    df = make_df(bars)
+    out = track_outcome(TrackInput(
+        entry_price=100, qty=10, stop=95, t1=120,
+        df_post_fill=df, max_hold_days=10,
+    ))
+    assert out.outcome_kind == "LOSS_STOP"
+    assert out.exit_price == 85   # at the open
+
+
 # ── close_open_outcomes loop ──────────────────────────────────────────────────
 
 @pytest.fixture

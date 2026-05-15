@@ -48,7 +48,8 @@ class TrackInput(BaseModel):
 class TrackResult(BaseModel):
     """Outcome of tracking — matches outcomes table schema."""
     outcome_kind: Literal[
-        "WIN_T1", "WIN_T2", "LOSS_STOP", "TIME_EXIT", "OPEN"
+        "WIN_T1", "WIN_T2", "LOSS_STOP", "TIME_EXIT", "OPEN",
+        "CORPORATE_ACTION",
     ]
     exit_date: str | None = None
     exit_price: float | None = None
@@ -91,6 +92,14 @@ def track_outcome(inp: TrackInput) -> TrackResult:
 
     mfe_price = entry   # tracks the highest high seen so far
     mae_price = entry   # tracks the lowest low seen so far
+    prev_close = entry  # previous bar's close (or entry for first bar)
+
+    # Hard floor on what counts as a real intraday move. A >25% adverse
+    # gap between consecutive closes/opens is almost always a corporate
+    # action (split, bonus, demerger) that yfinance's auto_adjust
+    # missed or that bhavcopy doesn't adjust. Reporting a -65% LOSS_STOP
+    # for VEDL after its bonus issue is data, not loss.
+    CORP_ACTION_THRESHOLD = 0.25   # 25% adverse gap
 
     n_bars = min(len(df), inp.max_hold_days)
     for i in range(n_bars):
@@ -100,7 +109,29 @@ def track_outcome(inp: TrackInput) -> TrackResult:
         except (KeyError, ValueError, TypeError):
             continue
 
-        # Track extremes
+        # Corporate-action filter: if the open gaps adversely > 25% vs
+        # prev_close, this is almost certainly a split/bonus/demerger.
+        # Close the position as CORPORATE_ACTION with 0% P&L (real
+        # shareholder is unaffected — the price ratio is bookkeeping).
+        # Phase 2 will add proper split-ratio adjustment for accurate
+        # post-event tracking.
+        if prev_close > 0:
+            adverse_gap = (prev_close - o) / prev_close
+            if adverse_gap > CORP_ACTION_THRESHOLD:
+                return TrackResult(
+                    outcome_kind="CORPORATE_ACTION",
+                    exit_date=str(df.index[i])[:10] if df.index[i] is not None else None,
+                    exit_price=prev_close,   # use unadjusted prev close = no P&L
+                    days_held=i + 1,
+                    gross_pnl_paise=0,
+                    gross_pnl_pct=0.0,
+                    max_favourable_excursion_pct=round((mfe_price - entry) / entry * 100, 2),
+                    max_adverse_excursion_pct=round((mae_price - entry) / entry * 100, 2),
+                    bars_examined=i + 1,
+                    is_closed=True,
+                )
+
+        # Track extremes (after corporate-action filter)
         if h > mfe_price:
             mfe_price = h
         if l < mae_price:
@@ -131,6 +162,9 @@ def track_outcome(inp: TrackInput) -> TrackResult:
         if t1_hit:
             return _close(inp, "WIN_T1", df.index[i], t1, i + 1,
                           mfe_price, mae_price)
+
+        # Bar fully processed — update prev_close for next iteration
+        prev_close = c
 
     # No stop/target hit within max_hold_days
     if n_bars > 0 and n_bars >= inp.max_hold_days:
