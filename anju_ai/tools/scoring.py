@@ -481,14 +481,44 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
         pass
 
     # ── Verdict ──────────────────────────────────────────────────
-    # Anju-trader-AI v0: simple thresholds matching anju-trader's STATES.min_score
-    # ranges. Phase 1+ calibrates these from backtest.
+    # Phase 1.6: dual-gate verdict (entry-model OR high score).
+    # Empirical evidence from the Phase 1.5 v2 backtest (1083 trades):
+    #   ENTRY MODEL bucket  trades   win%   net
+    #   🚀 Breakout Entry   9        100%   +1.538%   PROFITABLE
+    #   🔄 Retest Entry     70       77%    +0.082%   PROFITABLE
+    #   🎯 Early Base       24       67%    -0.423%   losing
+    #   📈 Momentum         448      67%    -0.574%   losing
+    #   — (empty)           532      64%    -0.793%   losing
+    #
+    #   SCORE bucket        trades   win%   net
+    #   30-34               18       89%    +0.378%   PROFITABLE
+    #   25-29               101      70%    -0.725%   losing
+    #   all other buckets:  losing
+    #
+    # Score 30+ is HIGH CONVICTION — typically means 2nd base + multiple
+    # volume signals + RS + stage 2 all firing together. These work even
+    # if entry_model doesn't match a clean pattern. User intuition
+    # confirmed empirically: 2nd base + high volume IS profitable.
+    PROFITABLE_ENTRIES = {"🚀 Breakout Entry", "🔄 Retest Entry"}
+    HIGH_CONVICTION_SCORE = 30   # score floor where any clean signal can BUY
+
     if score >= 15:
         verdict = "BUY"
     elif score >= 8:
         verdict = "WATCH"
     else:
         verdict = "AVOID"
+
+    # Phase 1.6 gate: BUY requires EITHER profitable entry_model OR
+    # score >= 30. Otherwise cap at WATCH (or AVOID if no entry pattern).
+    if not entry_model:
+        verdict = "AVOID"
+    elif verdict == "BUY":
+        if (entry_model not in PROFITABLE_ENTRIES
+                and score < HIGH_CONVICTION_SCORE):
+            # Has entry pattern but neither Breakout/Retest nor
+            # high-conviction — track but don't deploy.
+            verdict = "WATCH"
 
     cur_price  = round(float(close.iloc[-1]), 2)
     prev_close = float(close.iloc[-2]) if len(df) > 1 else cur_price

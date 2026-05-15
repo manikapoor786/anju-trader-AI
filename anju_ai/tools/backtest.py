@@ -57,6 +57,10 @@ class BacktestInput(BaseModel):
     max_hold_days: int = 90
     apply_costs: bool = True
     slippage_pct_buy: float = 0.15        # midcap default
+    # Phase 1.6: when True (default), only verdict=BUY signals get filled.
+    # WATCH/AVOID candidates are scored + traced but never deployed.
+    # Tests can set False to verify close-loop logic independently.
+    respect_verdict_gate: bool = True
     base_segment: str = "midcap"          # used for cost calc
     max_workers: int = 8                  # parallelism for symbol scoring
 
@@ -347,6 +351,10 @@ def run_backtest(inp: BacktestInput,
                 if res is None:
                     day_none += 1
                 elif res.score < inp.min_score:
+                    day_below += 1
+                elif inp.respect_verdict_gate and res.verdict != "BUY":
+                    # Phase 1.6: backtest respects verdict gate. WATCH/AVOID
+                    # signals are tracked but never deployed.
                     day_below += 1
                 else:
                     score_results.append(res)

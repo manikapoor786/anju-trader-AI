@@ -218,6 +218,9 @@ def test_close_loop_handles_ns_suffix_correctly():
         mode="aggressive", min_score=4.0,
         max_open_positions=10, capital_inr=1_000_000,
         max_hold_days=20, apply_costs=False,
+        # Disable Phase 1.6 verdict gate so this test focuses on the
+        # close-loop NS-suffix regression, independent of verdict logic.
+        respect_verdict_gate=False,
     )
     report, trades = run_backtest(inp, ohlcv_loader=loader)
     # Without the fix: 0 trades, 0 still open (all dropped).
