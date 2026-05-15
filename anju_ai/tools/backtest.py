@@ -265,8 +265,20 @@ def run_backtest(inp: BacktestInput,
         still_open = []
         for pos in open_positions:
             sym = pos["symbol"]
-            df_full = histories.get(sym)
+            # CRITICAL FIX: histories is keyed by SYMBOL.NS (with suffix),
+            # but pos["symbol"] is the STRIPPED form (e.g. "RELIANCE").
+            # DataFrame doesn't have a truthy value so check explicitly.
+            df_full = histories.get(sym + ".NS")
             if df_full is None:
+                df_full = histories.get(sym)
+            if df_full is None:
+                for key in histories:
+                    if key.replace(".NS", "") == sym:
+                        df_full = histories[key]; break
+            if df_full is None:
+                # Don't silently DROP the position — keep it open and try
+                # again tomorrow. Dropping = losing the trade entirely.
+                still_open.append(pos)
                 continue
             df_post = df_full[df_full.index > pd.to_datetime(pos["fill_date"])]
             df_post = df_post[df_post.index <= as_of]
@@ -367,14 +379,22 @@ def run_backtest(inp: BacktestInput,
                         break
             if df_full is None:
                 diag["fill_lookup_misses"] += 1
+                diag.setdefault("fill_drop_reasons", {})["no_df_full"] = \
+                    diag.get("fill_drop_reasons", {}).get("no_df_full", 0) + 1
                 continue
             df_post = df_full[df_full.index > as_of]
             if df_post.empty:
+                diag.setdefault("fill_drop_reasons", {})["empty_df_post"] = \
+                    diag.get("fill_drop_reasons", {}).get("empty_df_post", 0) + 1
                 continue
             fill_row = df_post.iloc[0]
             fill_date = str(df_post.index[0])[:10]
             # Slippage on BUY side
             base_open = float(fill_row["Open"])
+            if base_open <= 0:
+                diag.setdefault("fill_drop_reasons", {})["zero_open_price"] = \
+                    diag.get("fill_drop_reasons", {}).get("zero_open_price", 0) + 1
+                continue
             fill_price = round(base_open * (1 + inp.slippage_pct_buy / 100), 2)
 
             qty = _compute_qty(fill_price,
@@ -382,8 +402,11 @@ def run_backtest(inp: BacktestInput,
                                inp.capital_inr, inp.base_risk_pct,
                                inp.max_position_pct)
             if qty <= 0:
+                diag.setdefault("fill_drop_reasons", {})["qty_zero"] = \
+                    diag.get("fill_drop_reasons", {}).get("qty_zero", 0) + 1
                 continue
 
+            diag["candidates_filled"] = diag.get("candidates_filled", 0) + 1
             open_positions.append({
                 "signal_date": str(as_of)[:10],
                 "symbol": r.symbol, "score": r.score, "verdict": r.verdict,
@@ -404,6 +427,8 @@ def run_backtest(inp: BacktestInput,
     print(f"  Days scored: {diag['days_scored']}")
     print(f"  Scoring returned None: {diag['scoring_returned_none']:,} "
           f"({diag['scoring_returned_none'] / max(diag['days_scored'] * len(histories), 1) * 100:.1f}%)")
+    print(f"  Fill drop reasons: {diag.get('fill_drop_reasons', {})}")
+    print(f"  Candidates filled: {diag.get('candidates_filled', 0)}")
     print(f"  Scoring below min_score: {diag['scoring_below_threshold']:,} "
           f"({diag['scoring_below_threshold'] / max(diag['days_scored'] * len(histories), 1) * 100:.1f}%)")
     print(f"  Candidates above threshold: {diag['candidates_seen']:,}")

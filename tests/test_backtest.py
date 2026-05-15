@@ -170,6 +170,63 @@ def test_run_backtest_smoke_no_signals():
     assert report.total_closed >= 0
 
 
+def test_close_loop_handles_ns_suffix_correctly():
+    """REGRESSION: the close-loop used `histories.get(sym)` where sym was
+    the stripped form ('RELIANCE') but histories keys had the .NS suffix
+    ('RELIANCE.NS'). Result: every open position was silently dropped on
+    the next day, producing 0 closed trades even when 600+ candidates
+    were filled. Confirmed bug Day 1, fixed Day 2."""
+    import pandas as pd
+    from anju_ai.tools.backtest import run_backtest, BacktestInput
+
+    # Build a synthetic 100-day history with a clear breakout setup
+    n = 200
+    base_price = 100
+    closes = []
+    vols = []
+    for i in range(n):
+        if i < 60:
+            # 60d rally
+            closes.append(base_price * (1 + i * 0.01))
+            vols.append(800_000)
+        elif i < 150:
+            # 90d tight base around 160 with declining vol (dryup)
+            jitter = (i % 5 - 2) * 0.5
+            closes.append(160 + jitter)
+            vols.append(500_000 + (i % 7) * 30_000)
+        else:
+            # breakout
+            closes.append(160 * (1 + (i - 150) * 0.015))
+            vols.append(2_500_000 + (i % 3) * 200_000)
+
+    dates = pd.bdate_range(start="2024-01-01", periods=n)
+    df = pd.DataFrame({
+        "Open":   [c * 0.998 for c in closes],
+        "High":   [c * 1.012 for c in closes],
+        "Low":    [c * 0.99 for c in closes],
+        "Close":  closes,
+        "Volume": vols,
+    }, index=dates)
+
+    def loader(symbol, days):
+        return df.copy()
+
+    inp = BacktestInput(
+        name="regression_ns_suffix",
+        start_date="2024-04-01", end_date="2024-09-30",
+        universe_symbols=["TEST.NS"],
+        mode="aggressive", min_score=4.0,
+        max_open_positions=10, capital_inr=1_000_000,
+        max_hold_days=20, apply_costs=False,
+    )
+    report, trades = run_backtest(inp, ohlcv_loader=loader)
+    # Without the fix: 0 trades, 0 still open (all dropped).
+    # With the fix: at least one trade should close OR remain open
+    # (depending on whether the held period hits stop/target/time-exit).
+    total = report.total_closed + report.total_open
+    assert total > 0, "Bug regressed — every position is being dropped"
+
+
 def test_run_backtest_handles_missing_data_gracefully():
     inp = BacktestInput(
         name="missing", start_date="2024-01-01", end_date="2024-01-31",
