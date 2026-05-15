@@ -426,14 +426,23 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
                 stop_candidates.append(ma200_ex * 0.988)
             trailing_stop = round(max(stop_candidates), 2) if stop_candidates else round(cur_price * 0.95, 2)
 
-            # Targets: swing highs above price
+            # Targets: swing highs above price.
+            # Phase 1.7: T1 candidates must clear cur_price by >= +1.5%, not
+            # +0.5%. Empirical evidence — Phase 1.6 backtest (117 trades):
+            # the +0.5% buffer was too thin to survive normal gap-up risk
+            # between signal close and next-day fill. 4 of 5 worst losers
+            # had T1 within 0.2% of fill price (T1 in {474, 2800, 2334, 2958}
+            # vs fills {473.71, 2804.20, 2330.49, 2952.42}), giving the
+            # two-stage exit zero upside on its first partial. The +1.5%
+            # buffer leaves >= +0.5% T1 distance even after a 1% gap-up.
+            T1_MIN_DISTANCE = 1.015   # +1.5% above signal close
             h_arr = high.values
             lookback = min(len(h_arr), 252)
             peaks_idx = argrelextrema(h_arr[-lookback:], np.greater_equal, order=7)[0]
             target_candidates = []
             for i in peaks_idx:
                 p = float(h_arr[-lookback:][i])
-                if p > cur_price * 1.005:
+                if p > cur_price * T1_MIN_DISTANCE:
                     target_candidates.append((round(p, 2), "swing high"))
 
             # Fibonacci extensions from base pivot
@@ -444,12 +453,12 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
                 pole = pivot_val - base_low_v
                 for ratio, lbl in [(0.618, "Fib 0.618"), (1.0, "Fib 1.0"), (1.618, "Fib 1.618")]:
                     fib_p = round(pivot_val + ratio * pole, 2)
-                    if fib_p > cur_price * 1.005:
+                    if fib_p > cur_price * T1_MIN_DISTANCE:
                         target_candidates.append((fib_p, lbl))
 
             # MA levels above price
             for ma_v, lbl in [(ma50_ex, "MA50"), (ma200_ex, "MA200")]:
-                if ma_v and not pd.isna(ma_v) and ma_v > cur_price * 1.005:
+                if ma_v and not pd.isna(ma_v) and ma_v > cur_price * T1_MIN_DISTANCE:
                     target_candidates.append((round(ma_v, 2), lbl))
 
             # Sort + dedupe within 1.5% zones

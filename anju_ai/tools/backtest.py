@@ -61,6 +61,11 @@ class BacktestInput(BaseModel):
     # WATCH/AVOID candidates are scored + traced but never deployed.
     # Tests can set False to verify close-loop logic independently.
     respect_verdict_gate: bool = True
+    # Phase 1.7: when True (default), reject fills where T1 ended up within
+    # 0.5% of fill price (typically due to gap-up overshooting the swing
+    # high used as T1). This is Layer 2 of the T1-distance defence;
+    # Layer 1 is the signal-time +1.5% buffer in scoring.py.
+    respect_t1_distance: bool = True
     base_segment: str = "midcap"          # used for cost calc
     max_workers: int = 8                  # parallelism for symbol scoring
 
@@ -413,6 +418,18 @@ def run_backtest(inp: BacktestInput,
                 diag.setdefault("fill_drop_reasons", {})["qty_zero"] = \
                     diag.get("fill_drop_reasons", {}).get("qty_zero", 0) + 1
                 continue
+
+            # Phase 1.7 Layer 2: reject fill if T1 ended up too close to fill
+            # price after a gap-up. Layer 1 (signal-time +1.5% T1 buffer) is
+            # the primary defense; this catches edge cases where gap-up was
+            # larger than expected. Threshold: T1 must be >= +0.5% above fill.
+            t1_val = r.exit_logic.partial_target if r.exit_logic else None
+            if inp.respect_t1_distance and t1_val is not None and fill_price > 0:
+                t1_dist_pct = (t1_val - fill_price) / fill_price
+                if t1_dist_pct < 0.005:
+                    diag.setdefault("fill_drop_reasons", {})["t1_too_close_at_fill"] = \
+                        diag.get("fill_drop_reasons", {}).get("t1_too_close_at_fill", 0) + 1
+                    continue
 
             diag["candidates_filled"] = diag.get("candidates_filled", 0) + 1
             open_positions.append({

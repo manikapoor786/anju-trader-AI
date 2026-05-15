@@ -303,6 +303,18 @@ def main() -> int:
               f"net_exp={report.net_expectancy_pct:+.3f}%/trade")
     con.close()
 
+    # Phase 1.7: persist full per-trade list to a JSON artifact so we can
+    # do statistical analysis (T1 distance, MAE, days_held splits etc.)
+    # without re-running the backtest. memory.db only keeps top-5
+    # best/worst in summary_json — not enough for diagnostics.
+    trades_dir = ROOT / "data" / "backtests"
+    trades_dir.mkdir(parents=True, exist_ok=True)
+    trades_path = trades_dir / f"{name}.trades.json"
+    trades_path.write_text(json.dumps(
+        [t.model_dump() for t in trades], indent=2, default=str
+    ))
+    print(f"   wrote {len(trades)} trades → {trades_path}")
+
     print(f"\n✅ Backtest #{run_id} complete: {report.total_closed} closed trades, "
           f"net expectancy {report.net_expectancy_pct:+.3f}%/trade")
 

@@ -221,6 +221,9 @@ def test_close_loop_handles_ns_suffix_correctly():
         # Disable Phase 1.6 verdict gate so this test focuses on the
         # close-loop NS-suffix regression, independent of verdict logic.
         respect_verdict_gate=False,
+        # Disable Phase 1.7 fill-time T1-distance gate so this test
+        # doesn't filter out the synthetic fills it's trying to verify.
+        respect_t1_distance=False,
     )
     report, trades = run_backtest(inp, ohlcv_loader=loader)
     # Without the fix: 0 trades, 0 still open (all dropped).
@@ -228,6 +231,67 @@ def test_close_loop_handles_ns_suffix_correctly():
     # (depending on whether the held period hits stop/target/time-exit).
     total = report.total_closed + report.total_open
     assert total > 0, "Bug regressed — every position is being dropped"
+
+
+def test_t1_distance_gate_rejects_fills_with_t1_too_close():
+    """Phase 1.7: when gap-up at fill brings T1 within 0.5% of fill
+    price, the fill must be rejected (signals had T1 set against the
+    previous day's close; a meaningful gap-up eats the buffer entirely).
+
+    This was the dominant loss mechanism in the Phase 1.6 backtest —
+    4 of 5 worst Retest losers had T1 within 0.2% of fill, giving the
+    two-stage exit zero upside on the first partial."""
+    import pandas as pd
+    from anju_ai.tools.backtest import BacktestInput, run_backtest
+
+    # Build a generic breakout history (enough for scoring to fire).
+    n = 200
+    closes, vols = [], []
+    for i in range(n):
+        if i < 60:
+            closes.append(100 * (1 + i * 0.01))
+            vols.append(800_000)
+        elif i < 150:
+            jitter = (i % 5 - 2) * 0.5
+            closes.append(160 + jitter)
+            vols.append(500_000 + (i % 7) * 30_000)
+        else:
+            closes.append(160 * (1 + (i - 150) * 0.015))
+            vols.append(2_500_000)
+
+    dates = pd.bdate_range(start="2024-01-01", periods=n)
+    df = pd.DataFrame({
+        "Open":   [c * 0.998 for c in closes],
+        "High":   [c * 1.012 for c in closes],
+        "Low":    [c * 0.99 for c in closes],
+        "Close":  closes,
+        "Volume": vols,
+    }, index=dates)
+
+    def loader(symbol, days):
+        return df.copy()
+
+    # With the gate ON (default), no fill should produce T1 < 0.5% from
+    # fill_price. Approximate verification: any trade that does close
+    # must have t1/fill_price >= 1.005.
+    inp = BacktestInput(
+        name="t1_gate_on",
+        start_date="2024-04-01", end_date="2024-09-30",
+        universe_symbols=["TEST.NS"],
+        mode="aggressive", min_score=4.0,
+        max_open_positions=10, capital_inr=1_000_000,
+        max_hold_days=20, apply_costs=False,
+        respect_verdict_gate=False,
+        respect_t1_distance=True,
+    )
+    report, trades = run_backtest(inp, ohlcv_loader=loader)
+    for t in trades:
+        if t.t1 is not None and t.fill_price > 0:
+            assert (t.t1 - t.fill_price) / t.fill_price >= 0.005, (
+                f"{t.symbol}: T1 {t.t1} only "
+                f"{(t.t1 - t.fill_price) / t.fill_price * 100:.2f}% above "
+                f"fill {t.fill_price} — gate failed to reject"
+            )
 
 
 def test_run_backtest_handles_missing_data_gracefully():
