@@ -95,6 +95,10 @@ class ScoreResult(BaseModel):
     above_ma200: bool = False
     confidence: float = 0.5
     rejection_reason: str | None = None
+    # Phase 3.0: setup-aware classification.
+    # One of: BREAKOUT, MOMENTUM, COMEBACK, CONTRARIAN, EARLY_BASE, or None.
+    # None means the chart doesn't fit a tradeable setup → AVOID.
+    setup: str | None = None
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -519,29 +523,24 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
             pass
 
     # ── Verdict ──────────────────────────────────────────────────
-    # Phase 1.8: entry-model-aware T1-distance gate. The Phase 1.6
-    # score>=30 "high conviction" override is removed — Phase 1.7
-    # backtest data showed it was a trap: 25 trades, 48% win, -1.43%
-    # net (21 of 25 were Retest with redundant signals stacking score).
+    # Phase 3.0: setup-aware verdict. The Phase 1.6-1.8 single-formula
+    # approach (entry-model + T1 distance gates) treated all setups
+    # uniformly. Real-data study of the user's multi-baggers (HFCL,
+    # MODEFENCE, HINDZINC, BOMDYEING, SAIL) showed FIVE distinct setups
+    # need DIFFERENT scoring rules.
     #
-    # Empirical evidence from Phase 1.7 (112 trades, per-trade JSON
-    # in data/backtests/bt_20260515_164819*.trades.json):
+    # The setup classifier (anju_ai.tools.setups) categorises the chart
+    # into one of: BREAKOUT, MOMENTUM, COMEBACK, CONTRARIAN, EARLY_BASE,
+    # or None. Each setup has its own verdict gates from SETUP_PARAMS.
     #
-    #   Retest by T1 distance at fill:
-    #     1-2%  →  54% win, NET -1.28%   ← dead zone
-    #     2-3%  →  46% win, NET -2.00%   ← dead zone
-    #     3-5%  →  60% win, NET +0.56%   ← SWEET SPOT
-    #     5-10% →  44% win, NET -0.46%
-    #    >10%   →  25% win, NET -0.46%
-    #
-    #   Breakout works with close T1 (squeeze plays):
-    #     1-3%  →  88% win, all positive
-    #     3-6%  →  100% win
-    #     >6%   →  DIVISLAB -9.20% (single sample; cap as safety)
-    #
-    # Filter on simulated re-fill: 50 trades, 62% win, R:R 0.78x,
-    # NET +0.480%/trade — positive expectancy survives costs.
-    PROFITABLE_ENTRIES = {"🚀 Breakout Entry", "🔄 Retest Entry"}
+    # Legacy entry_model is retained as a secondary signal (and for
+    # backwards compatibility with traces / reports) but is no longer
+    # the primary gate — setup is.
+    from anju_ai.tools.setups import (
+        compute_features, classify_setup, SETUP_PARAMS,
+    )
+    features = compute_features(df, base_data, vol_signals_list)
+    setup = classify_setup(features) if features else None
 
     if score >= 15:
         verdict = "BUY"
@@ -550,28 +549,48 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
     else:
         verdict = "AVOID"
 
-    # Gate 1: must have an entry pattern AND that pattern must be one of
-    # the two empirically profitable ones (Breakout/Retest).
-    if not entry_model:
-        verdict = "AVOID"
-    elif verdict == "BUY" and entry_model not in PROFITABLE_ENTRIES:
-        verdict = "WATCH"
+    # Phase 3.0 Gate 1: no recognised setup → can't BUY.
+    if setup is None:
+        if verdict == "BUY":
+            verdict = "WATCH"
+    else:
+        params = SETUP_PARAMS[setup]
+        # Phase 3.0 Gate 2: setup-specific T1 distance window.
+        # Each setup has empirically/intuitively-derived T1 sweet zone:
+        #   BREAKOUT: 3-10%  COMEBACK: 4-15%  MOMENTUM: 2-8%
+        #   CONTRARIAN: 5-20%  EARLY_BASE: 3-8%
+        if verdict == "BUY" and exit_logic is not None and exit_logic.partial_target:
+            cur_close = float(close.iloc[-1])
+            t1_dist = (exit_logic.partial_target - cur_close) / cur_close
+            if not (params.t1_min_dist <= t1_dist <= params.t1_max_dist):
+                verdict = "WATCH"
 
-    # Gate 2: entry-model-aware T1 distance check. cur_close is the
-    # signal-day close; live fill happens next-day at open with slippage.
-    # We allow a small gap-up buffer in the thresholds below.
-    if verdict == "BUY" and exit_logic is not None and exit_logic.partial_target:
-        cur_close = float(close.iloc[-1])
-        t1_dist_pct = (exit_logic.partial_target - cur_close) / cur_close
-        if entry_model == "🔄 Retest Entry":
-            # Retest sweet zone: 3-10% from signal close → ~2.5-9.5% at fill.
-            if t1_dist_pct < 0.03 or t1_dist_pct > 0.10:
+        # Phase 3.0 Gate 3: setup-specific volume requirement.
+        # COMEBACK + CONTRARIAN need volume confirmation; MOMENTUM
+        # doesn't (extended setups often run on quiet volume).
+        if (verdict == "BUY" and params.min_vol_ratio > 0
+                and features is not None
+                and features.vol_ratio_20d < params.min_vol_ratio):
+            verdict = "WATCH"
+
+        # Phase 3.0 Gate 4: setup-specific 52wh distance.
+        # BREAKOUT/MOMENTUM should be near 52wh; COMEBACK/CONTRARIAN
+        # explicitly 5-30% / 20-50% off — outside their respective bands
+        # is a different setup type, downgrade.
+        if verdict == "BUY" and features is not None:
+            d52 = features.dist_from_52wh_pct / 100
+            if (params.near_52wh_min is not None
+                    and d52 < params.near_52wh_min):
                 verdict = "WATCH"
-        elif entry_model == "🚀 Breakout Entry":
-            # Breakout: capped on the upside only (close T1 works fine for
-            # squeezes; only filter the loose "no nearby resistance" case).
-            if t1_dist_pct > 0.06:
+            elif (params.near_52wh_max is not None
+                    and d52 > params.near_52wh_max):
                 verdict = "WATCH"
+
+    # Universal: must have an entry pattern flagged by anju-trader-style
+    # detector. Without a clean entry trigger, even a valid setup gets
+    # tracked but not deployed.
+    if not entry_model and verdict == "BUY":
+        verdict = "WATCH"
 
     cur_price  = round(float(close.iloc[-1]), 2)
     prev_close = float(close.iloc[-2]) if len(df) > 1 else cur_price
@@ -614,4 +633,5 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
         liquidity_ok=avg_vol_60 >= MIN_LIQUIDITY,
         above_ma200=above_ma200,
         confidence=min(1.0, max(0.0, score / 25.0)),
+        setup=setup,
     )

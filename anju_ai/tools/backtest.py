@@ -88,6 +88,7 @@ class TradeRecord(BaseModel):
     score: float
     verdict: str
     entry_model: str
+    setup: str | None = None         # Phase 3.0: setup classification
     fill_date: str
     fill_price: float
     qty: int
@@ -140,6 +141,7 @@ class BacktestReport(BaseModel):
     # Slices
     by_score_bucket: dict[str, dict]   # {"15-19": {trades, win_rate, net_exp}, ...}
     by_entry_model: dict[str, dict]
+    by_setup: dict[str, dict] = {}     # Phase 3.0: per-setup performance
     by_segment: dict[str, dict]
     by_month: dict[str, dict]
 
@@ -335,6 +337,7 @@ def run_backtest(inp: BacktestInput,
                 signal_date=pos["signal_date"],
                 symbol=pos["symbol"], score=pos["score"],
                 verdict=pos["verdict"], entry_model=pos["entry_model"],
+                setup=pos.get("setup"),
                 fill_date=pos["fill_date"], fill_price=pos["fill_price"],
                 qty=pos["qty"], stop=pos["stop"], t1=pos["t1"], t2=pos["t2"],
                 exit_date=result.exit_date, exit_price=result.exit_price,
@@ -521,6 +524,7 @@ def run_backtest(inp: BacktestInput,
                 "signal_date": str(as_of)[:10],
                 "symbol": r.symbol, "score": r.score, "verdict": r.verdict,
                 "entry_model": r.entry_model,
+                "setup": getattr(r, "setup", None),
                 "fill_date": fill_date, "fill_price": fill_price, "qty": qty,
                 "stop": r.exit_logic.stop if r.exit_logic else fill_price * 0.95,
                 "t1": r.exit_logic.partial_target if r.exit_logic else None,
@@ -628,6 +632,20 @@ def _build_report(inp: BacktestInput, trades: list[TradeRecord],
         v["net_expectancy_pct"] = round(statistics.mean(v["net_pnls"]), 3) if v["net_pnls"] else 0
         del v["net_pnls"]
 
+    # Phase 3.0: per-setup performance breakdown — the KEY new slice.
+    by_setup: dict[str, dict] = {}
+    for t in trades:
+        su = t.setup or "—"
+        by_setup.setdefault(su, {"trades": 0, "wins": 0, "net_pnls": []})
+        by_setup[su]["trades"] += 1
+        if t.outcome_kind.startswith("WIN"):
+            by_setup[su]["wins"] += 1
+        by_setup[su]["net_pnls"].append(t.net_pnl_pct)
+    for su, v in by_setup.items():
+        v["win_rate_pct"] = round(v["wins"] / v["trades"] * 100, 1) if v["trades"] else 0
+        v["net_expectancy_pct"] = round(statistics.mean(v["net_pnls"]), 3) if v["net_pnls"] else 0
+        del v["net_pnls"]
+
     # By month
     by_month: dict[str, dict] = {}
     for t in trades:
@@ -668,6 +686,7 @@ def _build_report(inp: BacktestInput, trades: list[TradeRecord],
         max_drawdown_pct=round(max_dd, 2),
         by_score_bucket=dict(sorted(by_score.items())),
         by_entry_model=by_em,
+        by_setup=by_setup,
         by_segment={},   # Phase 2 wires symbol→segment classification
         by_month=dict(sorted(by_month.items())),
         best_trades=best_trades,

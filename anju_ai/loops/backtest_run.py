@@ -170,6 +170,16 @@ def render_report(report: BacktestReport) -> str:
                 f"net=<b>{v['net_expectancy_pct']:+.3f}%</b>"
             )
 
+    if getattr(report, "by_setup", None):
+        lines += ["", f"<b>━━━ By setup (Phase 3.0) ━━━</b>"]
+        for su, v in sorted(report.by_setup.items(),
+                            key=lambda x: -x[1]["net_expectancy_pct"]):
+            lines.append(
+                f"  <code>{su or '—'}</code>  trades=<b>{v['trades']}</b>  "
+                f"win=<b>{v['win_rate_pct']}%</b>  "
+                f"net=<b>{v['net_expectancy_pct']:+.3f}%</b>"
+            )
+
     if report.best_trades:
         lines += ["", f"<b>━━━ Best 3 trades ━━━</b>"]
         for t in report.best_trades[:3]:
