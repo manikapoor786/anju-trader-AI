@@ -104,6 +104,11 @@ class TradeRecord(BaseModel):
     net_pnl_pct: float
     mfe_pct: float
     mae_pct: float
+    # Phase 3.0.1: per-component score breakdown for root-cause analysis
+    # of score-inversion (score>19 anti-predictive). Each entry is the
+    # contribution that component made to the final score, with reasoning
+    # tag. Used by diagnostic queries; not surfaced in Telegram report.
+    score_breakdown: dict[str, float] = {}
 
 
 class BacktestReport(BaseModel):
@@ -347,6 +352,7 @@ def run_backtest(inp: BacktestInput,
                 net_pnl_pct=net_pct,
                 mfe_pct=result.max_favourable_excursion_pct,
                 mae_pct=result.max_adverse_excursion_pct,
+                score_breakdown=pos.get("score_breakdown", {}),
             ))
         open_positions = still_open
 
@@ -525,6 +531,7 @@ def run_backtest(inp: BacktestInput,
                 "symbol": r.symbol, "score": r.score, "verdict": r.verdict,
                 "entry_model": r.entry_model,
                 "setup": getattr(r, "setup", None),
+                "score_breakdown": dict(getattr(r, "breakdown", {}) or {}),
                 "fill_date": fill_date, "fill_price": fill_price, "qty": qty,
                 "stop": r.exit_logic.stop if r.exit_logic else fill_price * 0.95,
                 "t1": r.exit_logic.partial_target if r.exit_logic else None,

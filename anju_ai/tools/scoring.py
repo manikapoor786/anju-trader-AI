@@ -523,19 +523,33 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
             pass
 
     # ── Verdict ──────────────────────────────────────────────────
-    # Phase 3.0: setup-aware verdict. The Phase 1.6-1.8 single-formula
-    # approach (entry-model + T1 distance gates) treated all setups
-    # uniformly. Real-data study of the user's multi-baggers (HFCL,
-    # MODEFENCE, HINDZINC, BOMDYEING, SAIL) showed FIVE distinct setups
-    # need DIFFERENT scoring rules.
+    # Phase 3.0.1: data-driven verdict refinement.
     #
-    # The setup classifier (anju_ai.tools.setups) categorises the chart
-    # into one of: BREAKOUT, MOMENTUM, COMEBACK, CONTRARIAN, EARLY_BASE,
-    # or None. Each setup has its own verdict gates from SETUP_PARAMS.
+    # Phase 3.0 architecture (setup-aware gates) shipped but its backtest
+    # was WORSE than Phase 1.8 (-1.008%/trade vs -0.620%). Trade-level
+    # analysis of bt_20260516_094808 (n=203) revealed:
     #
-    # Legacy entry_model is retained as a secondary signal (and for
-    # backwards compatibility with traces / reports) but is no longer
-    # the primary gate — setup is.
+    #   1. Score is anti-predictive ABOVE 19. Higher score → worse outcome.
+    #      Bucket 15-19: +0.627% net | 20-24: -1.213% | 25-29: -2.648% | 30+: -4%
+    #      Root cause unknown — some scoring component(s) reward stocks
+    #      about to top. Awaiting breakdown instrumentation (this commit
+    #      adds it) to identify which component(s).
+    #
+    #   2. entry_model × setup crosstab has ONE positive cell only:
+    #      📈 Momentum Entry × BREAKOUT setup: 100 trades, +0.086% net
+    #      All other 11 cells are net-negative. The old Phase 1.7-1.8
+    #      whitelist {Breakout Entry, Retest Entry} now LOSES (-3.5% / -2.1%
+    #      on BREAKOUT setup) — it was right for pre-3.0 calibration but
+    #      Phase 3.0 setup gates re-filtered which trades pass, inverting
+    #      the entry_model performance distribution.
+    #
+    #   3. Combined filter (Momentum Entry × BREAKOUT × score≤19) yields:
+    #      42 trades, 64.3% win, +1.404% net — first positive cell found.
+    #
+    # Three gates below — layered, attributable. Each can be relaxed
+    # independently as we learn. The Phase 3.0 setup-aware code (classifier,
+    # T1/vol/52wh gates) is RETAINED — those gates still help filter junk
+    # within the BREAKOUT setup. We just add stricter top-level filters.
     from anju_ai.tools.setups import (
         compute_features, classify_setup, SETUP_PARAMS,
     )
@@ -549,34 +563,45 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
     else:
         verdict = "AVOID"
 
-    # Phase 3.0 Gate 1: no recognised setup → can't BUY.
-    if setup is None:
-        if verdict == "BUY":
-            verdict = "WATCH"
-    else:
+    # Phase 3.0.1 Gate A: SCORE CAP at 19. Above this, scoring formula
+    # is empirically anti-predictive (root cause TBD, see breakdown
+    # instrumentation). Watch but don't deploy.
+    if verdict == "BUY" and score >= 20:
+        verdict = "WATCH"
+
+    # Phase 3.0.1 Gate B: entry_model whitelist. Only "📈 Momentum Entry"
+    # has positive expectancy on the BREAKOUT setup. The old Phase 1.7-1.8
+    # whitelist {Breakout Entry, Retest Entry} is now net-negative —
+    # do NOT restore it without re-validation.
+    PROFITABLE_ENTRIES = {"📈 Momentum Entry"}
+    if verdict == "BUY" and entry_model not in PROFITABLE_ENTRIES:
+        verdict = "WATCH"
+
+    # Phase 3.0.1 Gate C: setup whitelist. Only BREAKOUT has the trade
+    # count + expectancy to deploy. COMEBACK/CONTRARIAN/EARLY_BASE all
+    # net-negative with N too small to learn from yet. MOMENTUM setup
+    # (Momentum Entry × MOMENTUM setup) was -1.52% — different cell.
+    PROFITABLE_SETUPS = {"BREAKOUT"}
+    if verdict == "BUY" and setup not in PROFITABLE_SETUPS:
+        verdict = "WATCH"
+
+    # Phase 3.0 retained gates (still active inside BREAKOUT setup):
+    # they filter T1 distance, vol ratio, and 52wh band on the trades
+    # that survive the whitelist above.
+    if setup is not None:
         params = SETUP_PARAMS[setup]
-        # Phase 3.0 Gate 2: setup-specific T1 distance window.
-        # Each setup has empirically/intuitively-derived T1 sweet zone:
-        #   BREAKOUT: 3-10%  COMEBACK: 4-15%  MOMENTUM: 2-8%
-        #   CONTRARIAN: 5-20%  EARLY_BASE: 3-8%
+        # Gate D: setup-specific T1 distance window.
         if verdict == "BUY" and exit_logic is not None and exit_logic.partial_target:
             cur_close = float(close.iloc[-1])
             t1_dist = (exit_logic.partial_target - cur_close) / cur_close
             if not (params.t1_min_dist <= t1_dist <= params.t1_max_dist):
                 verdict = "WATCH"
-
-        # Phase 3.0 Gate 3: setup-specific volume requirement.
-        # COMEBACK + CONTRARIAN need volume confirmation; MOMENTUM
-        # doesn't (extended setups often run on quiet volume).
+        # Gate E: setup-specific volume requirement.
         if (verdict == "BUY" and params.min_vol_ratio > 0
                 and features is not None
                 and features.vol_ratio_20d < params.min_vol_ratio):
             verdict = "WATCH"
-
-        # Phase 3.0 Gate 4: setup-specific 52wh distance.
-        # BREAKOUT/MOMENTUM should be near 52wh; COMEBACK/CONTRARIAN
-        # explicitly 5-30% / 20-50% off — outside their respective bands
-        # is a different setup type, downgrade.
+        # Gate F: setup-specific 52wh distance band.
         if verdict == "BUY" and features is not None:
             d52 = features.dist_from_52wh_pct / 100
             if (params.near_52wh_min is not None
@@ -585,12 +610,6 @@ def score_signal(inp: ScoreInput) -> ScoreResult | None:
             elif (params.near_52wh_max is not None
                     and d52 > params.near_52wh_max):
                 verdict = "WATCH"
-
-    # Universal: must have an entry pattern flagged by anju-trader-style
-    # detector. Without a clean entry trigger, even a valid setup gets
-    # tracked but not deployed.
-    if not entry_model and verdict == "BUY":
-        verdict = "WATCH"
 
     cur_price  = round(float(close.iloc[-1]), 2)
     prev_close = float(close.iloc[-2]) if len(df) > 1 else cur_price
